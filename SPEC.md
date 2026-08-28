@@ -68,7 +68,7 @@ Every change to a governed repository rides one backbone: **issue → branch →
 - **Commit convention.** `<type>(#<N>)[!]: <subject>`, subject 1–72 codepoints. The required group (`feat` / `fix` / `docs` / `refactor` / `perf`) must carry an issue number; the optional group (`test` / `style` / `build` / `ci` / `chore` / `revert`) may carry one (an issue or PR number). The grammar is enforced at the local tier (§3.2).
 - **Draft PR early.** The PR opens as a draft with its first real commit — never an empty seed commit — and its body is maintained as a living document (§2.3).
 - **Linkage.** The PR body's first line carries `Closes #N` when merging to the default branch closes the issue, `Refs #N` for intermediate work.
-- **Merge shape.** Merges to the default branch use a merge commit (no fast-forward, no squash), so the branch's phase commits (§1.2) stay readable on the trunk. The server-side ruleset (§3.3) enforces non-fast-forward history.
+- **Merge shape.** Merges to the default branch use a merge commit (no fast-forward, no squash), so the branch's phase commits (§1.2) stay readable on the trunk. The server-side ruleset (§3.3) enforces both faces: the merge-commit method is the only one it allows into the default branch, and history is non-fast-forward. Squash and rebase remain legitimate on non-default bases (topic-branch consolidation), which the ruleset does not govern.
 
 ### 1.2 Doc → Test → Code work order
 
@@ -82,7 +82,7 @@ Within one issue, work proceeds in three phases, each its own commit, in order:
 
 ### 1.3 Changelog-fragment discipline
 
-Every PR to the default branch lands exactly one changelog fragment `changelog_unreleased/<category>/<N>.md` — `<category>` one of the six Keep-a-Changelog categories (`changelog_unreleased/TEMPLATE.md`), `<N>` the PR number or a closing issue number — or carries the `skip-changelog` label for changes with no user-observable effect. A fragment describes only what its PR lands, in one bullet. CI-enforced by `.github/workflows/check-changelog.yml` (the `fragment-gate` required check). Fragments are consolidated into a versioned changelog at release time; the fragment tree empties with each release.
+Every PR to the default branch lands exactly one changelog fragment `changelog_unreleased/<category>/<N>.md` — `<category>` one of the six Keep-a-Changelog categories (`changelog_unreleased/TEMPLATE.md`), `<N>` the PR number or a closing issue number — or carries the `skip-changelog` label for changes with no user-observable effect. A fragment describes only what its PR lands, in one bullet. CI enforces the floor — at least one valid in-allow-set fragment or the skip label, with every added fragment valid (`.github/workflows/check-changelog.yml`, the `fragment-gate` required check); the exactly-one norm above that floor is review-enforced (§2.3). Fragments are consolidated into a versioned changelog at release time; the fragment tree empties with each release.
 
 ## 2. Artifact hierarchy and lifecycle
 
@@ -90,7 +90,7 @@ This section states the issue types and their lifecycle states (proposed → act
 
 ### 2.1 Issue types
 
-The type of an issue is its label — never inference from prose. The shipped issue-form templates (`.github/ISSUE_TEMPLATE/`) file each type with its label preapplied:
+The type of an issue is its label — never inference from prose. The shipped issue-form templates (`.github/ISSUE_TEMPLATE/`) file each locally-filed type with its label preapplied; `initiative` alone has no template, because an Initiative arrives from upstream and is never filed here:
 
 - **`task`** — a standalone unit of work.
 - **`bug`** — a defect against documented behavior.
@@ -148,7 +148,7 @@ The gate classes the enforcement layer commits to, with their current tier homes
 
 | Class | Guards against | Tier home (current) |
 |---|---|---|
-| protected-branch | direct commit/push to the default or release branches | tier 2 (adapters); tier 3 (ruleset); tier 1 planned first |
+| protected-branch | direct commit/push to the default or release branches | tier 2 (adapters); tier 3 (ruleset — default branch only today); tier 1 planned first |
 | force-push | history rewrites on protected refs | tier 2 (by subsumption); tier 3 (non-fast-forward rule) |
 | secret | committing a staged secret | tier 2 (delegated scan) |
 | commit-format | malformed commit subjects | tier 2 (delegated grammar check) |
@@ -182,7 +182,7 @@ Committed substrate carries no absolute paths, no clone-specific values, and no 
 
 ### 4.3 PR-based installs
 
-Substrate lands in an adopting repository through the standard flow — a reviewed PR (§1.1) — never a direct push. The one exception is the stage-0 seed of an empty repository (an unborn default branch cannot host a PR); that seed is minimal (the direction documents), scoped, and audit-logged. Server-side configuration (labels, the branch ruleset, board mirrors) is applied via the platform API; the repository records the shape server config must match — above all that required-check contexts equal the CI job names (`fragment-gate`, `ssot-home`, `toc-freshness`).
+Substrate lands in an adopting repository through the standard flow — a reviewed PR (§1.1) — never a direct push. The one exception is the stage-0 seed of an empty repository (an unborn default branch cannot host a PR); that seed is minimal (the direction documents), scoped, and audit-logged. Server-side configuration (labels, the branch ruleset, board mirrors) is applied via the platform API; the repository records the shape server config must match — above all that required-check contexts equal the CI job names (`fragment-gate`, `ssot-home`, `toc-freshness`) and that the default branch's allowed merge method is the merge commit alone (§1.1).
 
 ### 4.4 Headless and scripted operation
 
@@ -202,7 +202,7 @@ A best-effort automation fails **open with a surfaced signal**, never closed and
 
 ### 5.3 Gate-activation conditions
 
-A gate whose subject does not yet exist **sleeps clean and says so**: its skip condition is part of its contract, stated where the gate is implemented (observed: `check-toc.yml` and `check-ssot-home.sh` skip while no `SPEC.md` exists, and each names that condition in its own text). Two obligations follow: the skip must be a deliberate branch, not an accidental fall-through; and a sleeping gate's **first activation is probed at the smallest possible change** — the change that creates the subject is pushed and verified against the real CI environment before anything larger rides on the gate (this SPEC's own PR exercised exactly that probe).
+A gate whose subject does not yet exist **sleeps clean and says so**: its skip condition is part of its contract, stated where the gate is implemented (observed: `check-toc.yml` and `check-ssot-home.sh` skip while no `SPEC.md` exists, and each names that condition in its own text). Two obligations follow: the skip must be a deliberate branch, not an accidental fall-through; and a sleeping gate's **first activation is probed at the smallest possible change** — the change that creates the subject is pushed and verified against the real CI environment before anything larger rides on the gate (this SPEC's own PR exercised exactly that probe — issue #5).
 
 ### 5.4 Work language
 
