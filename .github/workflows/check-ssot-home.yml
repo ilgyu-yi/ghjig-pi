@@ -1,0 +1,43 @@
+name: check-ssot-home
+
+# Per-PR SSOT-home discipline gate.
+# Fails when a repo's docs/ already point at a SPEC ("SPEC §…") but the external
+# contract does not live in SPEC.md (absent or a scaffold stub — Rule 2), or when
+# a docs/*.md does not lead with a "Full details in SPEC §N" pointer (Rule 1,
+# docs-thin-pointer). Skips clean when a repo is genuinely contract-less
+# (no SPEC.md and no docs pointing at one).
+#
+# Pure bash. No third-party Actions; actions/checkout
+# is the GitHub-shipped git-clone equivalent. Runs
+# the shipped check-ssot-home.sh with the repo root as the default root.
+#
+# Does NOT self-trigger on its own landing PR — GitHub's pull_request security
+# policy excludes workflow files modified inside a PR from running on that PR.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - '*-maintenance'
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  ssot-home:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR HEAD
+        uses: actions/checkout@v4
+
+      - name: Check SSOT-home discipline
+        run: |
+          set -euo pipefail
+
+          if [ ! -f .github/workflows/check-ssot-home.sh ]; then
+            echo "::error::.github/workflows/check-ssot-home.sh is missing — reinstall the dir-mode substrate (/onboard-dir-mode --tier 3)." >&2
+            exit 1
+          fi
+
+          bash .github/workflows/check-ssot-home.sh

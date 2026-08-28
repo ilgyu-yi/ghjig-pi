@@ -1,0 +1,62 @@
+name: check-toc
+
+# Per-PR SPEC ToC-freshness gate.
+# Fails when SPEC.md's Table of contents is stale relative to its headings,
+# so a stale ToC (which breaks targeted Read --offset navigation) cannot
+# reach the trunk. Skips clean when the repo has no SPEC.md — a project
+# with no external contract legitimately has none.
+#
+# Pure bash. No third-party Actions;
+# actions/checkout is the GitHub-shipped git-clone equivalent.
+# Runs the shipped build_toc.sh.
+#
+# Does NOT self-trigger on its own landing PR — GitHub's pull_request
+# security policy excludes workflow files modified inside a PR from
+# running on that PR.
+
+on:
+  pull_request:
+    branches:
+      - main
+      - '*-maintenance'
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  toc-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR HEAD
+        uses: actions/checkout@v4
+
+      - name: Check SPEC ToC freshness
+        run: |
+          set -euo pipefail
+
+          if [ ! -f SPEC.md ]; then
+            echo "No SPEC.md in this repo — skipping ToC-freshness check (a project with no external contract has no SPEC)."
+            exit 0
+          fi
+
+          if [ ! -f .github/workflows/build_toc.sh ]; then
+            echo "::error::.github/workflows/build_toc.sh is missing — reinstall the dir-mode substrate (/onboard-dir-mode --tier 3)." >&2
+            exit 1
+          fi
+
+          # Capture build_toc's exit code and map each to a distinct positive-fix
+          # message (taxonomy: 0 clean / 1 stale / 3 marker-less / 4
+          # corrupt). `|| rc=$?` keeps the non-zero code alive under set -e.
+          rc=0
+          bash .github/workflows/build_toc.sh --check --spec SPEC.md || rc=$?
+          if [ "$rc" -eq 3 ]; then
+            echo "::error::SPEC.md has a marker-less (legacy anchor-link) Table of contents. build_toc.sh --migrate converts it ONLY when SPEC.md already uses numbered '## N.' headings and a '## Table of contents' block; otherwise number the headings ('## N. Title') or add the TOC markers by hand, then commit the result." >&2
+            exit 1
+          elif [ "$rc" -eq 4 ]; then
+            echo "::error::SPEC.md has corrupt TOC markers (START present without END). Repair the markers, then regenerate with build_toc.sh." >&2
+            exit 1
+          elif [ "$rc" -ne 0 ]; then
+            echo "::error::SPEC.md Table of contents is stale (rc=$rc). Regenerate it (build_toc.sh) and commit the result in the same PR (regenerate the ToC in the SPEC-editing commit)." >&2
+            exit 1
+          fi
