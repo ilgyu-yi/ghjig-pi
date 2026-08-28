@@ -1,6 +1,6 @@
 # ghjig-pi
 
-<One-paragraph description of what this project is and who it's for.>
+An agent-agnostic operating shell that enforces engineering work norms — the GitHub-standard flow (issue → branch → draft PR → review-gated merge), documentation, testing, and evidence discipline — for agent-driven development on the [pi harness](https://github.com/earendil-works/pi). Built for agents and the human operators who work with them.
 
 ## Status
 
