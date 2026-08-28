@@ -8,6 +8,7 @@
 . "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 githook_source conventional_commit.sh commit-format || exit 0
+githook_require check_commit_subject
 
 _gh_msgfile="${1:-}"
 [ -n "$_gh_msgfile" ] && [ -f "$_gh_msgfile" ] || exit 0

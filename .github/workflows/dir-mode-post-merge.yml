@@ -8,13 +8,13 @@
 #   If one resolves, post a single hook-enforced reflection comment on the parent
 #   Directive Issue. The comment is the canonical audit surface for events
 #   the Action emits — it doubles as the `directive-exec-count` and
-#   `directive-reflect` audit records that /ship step 10.5 and /reflect
+#   `directive-reflect` audit records that the /ship merge step and /reflect
 #   produce when an agent session is in the loop.
 #
 # Idempotency: scans existing comments on the parent Directive for the
 # merged PR's URL. If found, exits 0 with a no-op.
 #
-# Defense in depth: the shell's /ship (step 10.5) and /reflect procedures
+# Defense in depth: the shell's /ship merge step and /reflect procedures
 # remain valid for agent-in-loop execution. This workflow's URL check (above) prevents IT from double-posting;
 # /reflect dedupes on the reflect-stub/reflect-enriched content markers and
 # enriches this stub in place rather than no-op'ing on the shared URL.

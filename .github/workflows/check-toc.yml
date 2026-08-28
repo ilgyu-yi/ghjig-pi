@@ -41,7 +41,7 @@ jobs:
           fi
 
           if [ ! -f .github/workflows/build_toc.sh ]; then
-            echo "::error::.github/workflows/build_toc.sh is missing — reinstall the dir-mode substrate (/onboard-dir-mode --tier 3)." >&2
+            echo "::error::.github/workflows/build_toc.sh is missing — restore it from this repository's history (the substrate onboarding commit ships it)." >&2
             exit 1
           fi
 

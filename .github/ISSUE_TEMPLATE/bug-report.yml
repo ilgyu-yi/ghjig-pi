@@ -17,9 +17,9 @@ body:
       label: Reproducer
       description: Steps to reproduce. Include command + expected vs actual output. If discovered during a session, include the timestamp and audit-log entry if relevant.
       placeholder: |
-        1. Run `gh pr merge 77 --auto --merge --delete-branch 2>&1 | tail -5` on a PR with AC closed out.
-        2. Expected: matcher recognizes happy path, no audit emission (mark_allow silent).
-        3. Actual: `pass-through` warn emitted at <timestamp>.
+        1. Run `<command> 2>&1 | tail -5` under <conditions>.
+        2. Expected: <the documented behavior>.
+        3. Actual: <the observed output, with timestamp if relevant>.
     validations:
       required: true
 

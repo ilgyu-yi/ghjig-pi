@@ -214,7 +214,7 @@ fi
 # iterations. The bound `2` here is a safety cap, not an optimization.
 for pass in 1 2 3; do
   tmp=$(mktemp)
-  render_toc_into "$tmp" || { rm -f "$tmp"; exit $?; }
+  render_toc_into "$tmp" || { rc=$?; rm -f "$tmp"; exit "$rc"; }
   if cmp -s "$SPEC" "$tmp"; then
     rm -f "$tmp"
     echo "build_toc: SPEC.md TOC up to date (converged in pass $pass)."

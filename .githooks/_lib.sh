@@ -10,10 +10,22 @@
 #
 # Delegation contract: <repo-top>/.ghjig/shell-adapter.sh is per-clone,
 # UNTRACKED state, written when the clone registers with a dev shell. All
-# knowledge of that shell's layout and runtime interface lives in the
+# knowledge of that shell's LOCATION and runtime interface lives in the
 # adapter, never in this committed file. On sourcing, the adapter must
-# provide: `safe_source`, `audit_log` (functions) and GHJIG_SHELL_HELPERS
-# (the shell's helper dir). Anything missing → no-op (advice tier).
+# provide: the functions `safe_source` and `audit_log`, and
+# GHJIG_SHELL_HELPERS — a directory of helper files the adapters delegate
+# every check to. The full delegated interface the adapters require of
+# that directory:
+#   branch_guard.sh        → current_branch, is_protected_branch
+#   secret_scan.sh         → scan_staged_secrets (honors a repo-root
+#                            .shellsecretignore allow-list)
+#   conventional_commit.sh → check_commit_subject (the
+#                            `<type>(#<N>)[!]: <subject>` grammar,
+#                            subject 1..72 codepoints)
+# Anything missing — adapter file, provided function, helper file, or a
+# delegated function inside a helper — → no-op (advice tier):
+# githook_require guards each delegated function after sourcing, so a
+# present-but-incomplete helper degrades to allow, never to a false block.
 set -uo pipefail
 
 _gh_top="$(git rev-parse --show-toplevel 2>/dev/null)" || _gh_top=""
@@ -30,6 +42,14 @@ command -v audit_log  >/dev/null 2>&1 || exit 0
 # safe_source) on miss; the adapter then short-circuits to exit 0.
 githook_source() {
   safe_source "$GHJIG_SHELL_HELPERS/$1" "${2:-git-hook-tier}"
+}
+
+# githook_require <function-name> — advisory-face guard. A helper file that
+# sourced cleanly but does not define the delegated function would
+# otherwise fail CLOSED at the call site (127 → a false block under a
+# wrong cause). If the function is absent, no-op the whole hook instead.
+githook_require() {
+  command -v "$1" >/dev/null 2>&1 || exit 0
 }
 
 # githook_block <category> <message> — emit a clear stderr line, best-effort

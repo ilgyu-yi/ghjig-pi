@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
 
           if [ ! -f .github/workflows/check-ssot-home.sh ]; then
-            echo "::error::.github/workflows/check-ssot-home.sh is missing — reinstall the dir-mode substrate (/onboard-dir-mode --tier 3)." >&2
+            echo "::error::.github/workflows/check-ssot-home.sh is missing — restore it from this repository's history (the substrate onboarding commit ships it)." >&2
             exit 1
           fi
 
