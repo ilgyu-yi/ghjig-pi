@@ -4,7 +4,7 @@ An agent-agnostic operating shell that enforces engineering work norms — the G
 
 ## Status
 
-Bootstrapping. The repository substrate (labels, templates, CI gates, branch protection) is being seeded; the project contract lands next as `SPEC.md`.
+Active development under the contract in [`SPEC.md`](SPEC.md).
 
 ## Getting started
 
@@ -13,3 +13,4 @@ Bootstrapping. The repository substrate (labels, templates, CI gates, branch pro
 ## Documentation
 
 - [`MISSION.md`](MISSION.md) — canonical direction for this project.
+- [`SPEC.md`](SPEC.md) — the behavioural SSOT: work norms, gate classes, and workflow contracts.
