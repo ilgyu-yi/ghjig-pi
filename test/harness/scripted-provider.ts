@@ -99,7 +99,10 @@ export default function scriptedProvider(pi: ExtensionAPI) {
 		name: "Scripted",
 		baseUrl: "http://scripted.invalid/v1",
 		apiKey: "scripted-dummy-key",
-		api: "openai-completions",
+		// The substrate's own wire dialect — the one `Api` member that names no
+		// third-party vendor. Inert here: `streamSimple` below answers every turn
+		// from `script.json`, so no dialect implementation is ever reached.
+		api: "pi-messages",
 		models: [
 			{
 				id: "scripted-model",
