@@ -13,7 +13,8 @@
  *      measure" (§3.9: an unmeasurable predicate refuses, never approves).
  *
  * Uses throwaway PROBE extensions generated here — never the ghjig runtime
- * — so this suite must be green while the AC suites still fail.
+ * — so its result depends on the harness and the substrate alone: a red here
+ * means the measuring instrument is broken, never the runtime under test.
  */
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

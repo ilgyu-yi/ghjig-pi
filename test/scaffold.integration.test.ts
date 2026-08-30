@@ -89,6 +89,8 @@ let d1Fixture: Fixture;
 let d1Run: PiRunResult;
 let pollutedFixture: Fixture;
 let pollutedRun: PiRunResult;
+let seamDecoyFixture: Fixture;
+let seamDecoyRun: PiRunResult;
 let decoyTree: string;
 let decoyEntriesBefore: string[];
 
@@ -120,12 +122,21 @@ before(async () => {
 		decoyEnv[name] = decoyTree;
 	}
 	pollutedRun = await runPi(pollutedFixture, { env: decoyEnv });
+
+	// Run 4: the generic env channel tries to replace the state seam with an
+	// unusable value. The seam is bound after the spread, so the attempt must
+	// not reach it — `seamOverride` is the only door (§4.6).
+	seamDecoyFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	seamDecoyRun = await runPi(seamDecoyFixture, {
+		env: { GHJIG_TEST_STATE_ROOT: "relative/state-root" },
+	});
 });
 
 after(() => {
 	removeFixture(cleanFixture);
 	removeFixture(d1Fixture);
 	removeFixture(pollutedFixture);
+	removeFixture(seamDecoyFixture);
 	rmSync(decoyTree, { recursive: true, force: true });
 });
 
@@ -242,6 +253,17 @@ describe("AC4: polluted ambient environment (§4.6)", () => {
 
 	it("adds zero entries to the decoy tree", () => {
 		assert.deepEqual(listTreeEntries(decoyTree), decoyEntriesBefore);
+	});
+});
+
+describe("AC4: the harness seam has exactly one door (§4.6)", () => {
+	it("completes despite an env-channel attempt to replace the state seam", () => {
+		assert.equal(seamDecoyRun.exitCode, 0, diagnostics(seamDecoyRun));
+	});
+
+	it("keeps the state root at the fixture's own seam target", () => {
+		const [entry] = registrationEntries(seamDecoyFixture);
+		assert.equal(entry?.data.stateRoot, seamDecoyFixture.stateDir, diagnostics(seamDecoyRun));
 	});
 });
 

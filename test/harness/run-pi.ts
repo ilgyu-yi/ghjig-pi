@@ -11,7 +11,8 @@
  *   - isolates pi's own config (`HOME`, `PI_CODING_AGENT_DIR`) inside the
  *     fixture and disables startup network work (`PI_OFFLINE=1`),
  *   - sets the single test-only state seam `GHJIG_TEST_STATE_ROOT` to
- *     `<fixture>/state` (§5.5 disposable-root carve-out).
+ *     `<fixture>/state` (§5.5 disposable-root carve-out), replaceable only
+ *     through the explicit `seamOverride` option and never through `env`.
  *
  * The ghjig runtime under test is linked from THIS repository's tree
  * (`.pi/extensions/ghjig.ts` + `.pi/extensions/ghjig/`) into the fixture,
@@ -68,8 +69,21 @@ export interface Fixture {
 
 export interface RunOptions {
 	prompt?: string;
-	/** Extra environment for the pi process (e.g. decoy variables). Overrides the hermetic base. */
+	/**
+	 * Extra environment for the pi process (e.g. decoy variables). Overrides
+	 * every variable of the hermetic base EXCEPT the state seam
+	 * `GHJIG_TEST_STATE_ROOT` — see `seamOverride`.
+	 */
 	env?: Record<string, string>;
+	/**
+	 * Deliberate replacement of the single state seam (§4.6: exactly one
+	 * documented override seam, marked test-only). This is the ONLY channel
+	 * that can move the suite's state root off `<fixture>/state`, so an
+	 * unusable-seam arm has to ask for it by name; `env` cannot reach the
+	 * seam even by accident, which keeps every other run off the operational
+	 * evidence surface (§5.5).
+	 */
+	seamOverride?: string;
 	timeoutMs?: number;
 }
 
@@ -125,9 +139,10 @@ export function buildFixture(options: FixtureOptions): Fixture {
 	writeFileSync(join(root, "script.json"), `${JSON.stringify(options.script, null, "\t")}\n`);
 
 	if (options.linkGhjigRuntime) {
-		// Targets may not exist yet (Test phase precedes Code): a dangling
-		// symlink is intentionally legal here — pi then loads nothing and the
-		// suite's evidence assertions fail, which is the intended failure.
+		// Fixture construction never verifies the link targets: a dangling
+		// symlink is legal here by design. Whether the runtime is present is
+		// measured by the suite's evidence assertions, never by the builder —
+		// the harness lays out the shape, the assertions read the result.
 		symlinkSync(join(repoRoot(), ".pi", "extensions", "ghjig.ts"), join(extensionsDir, "ghjig.ts"), "file");
 		symlinkSync(join(repoRoot(), ".pi", "extensions", "ghjig"), join(extensionsDir, "ghjig"), "dir");
 	}
@@ -174,8 +189,11 @@ export function runPi(fixture: Fixture, options: RunOptions = {}): Promise<PiRun
 		HOME: fixture.homeDir,
 		PI_CODING_AGENT_DIR: fixture.piAgentDir,
 		PI_OFFLINE: "1",
-		GHJIG_TEST_STATE_ROOT: fixture.stateDir,
 		...options.env,
+		// Bound AFTER the spread: `env` overrides everything else, but the one
+		// variable that keeps this run off the operational state root is
+		// reachable only through the explicit `seamOverride` opt-in (§4.6, §5.5).
+		GHJIG_TEST_STATE_ROOT: options.seamOverride ?? fixture.stateDir,
 	};
 	return new Promise((resolvePromise) => {
 		// stdio[0] = "ignore" attaches /dev/null: the explicit end-of-input
