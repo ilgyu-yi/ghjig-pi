@@ -26,6 +26,15 @@ export default function ghjig(pi: ExtensionAPI) {
 		text: `ghjig runtime loaded from ${repoRoot}`,
 	});
 
+	// Self-announcing override (§4.6, §5.9): an active seam is never silent.
+	if (seamActive) {
+		appendAuditRecord(stateRoot, {
+			category: "runtime",
+			action: "seam-active",
+			text: `state root overridden by test seam GHJIG_TEST_STATE_ROOT -> ${stateRoot}`,
+		});
+	}
+
 	pi.on("session_start", () => {
 		appendAuditRecord(stateRoot, {
 			category: "runtime",
