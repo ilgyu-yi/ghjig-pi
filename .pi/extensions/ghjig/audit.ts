@@ -7,11 +7,14 @@
  * split a record.
  *
  * Fail posture (§3.9, `audit-append` row): a missing or unwritable
- * destination degrades OPEN — warn, return `false`, never throw. This
- * primitive also never creates the destination directory: state-root
- * creation belongs to the first operational writer, not to
- * observability (§3.8 — additive observability never moves a fail
- * direction).
+ * destination degrades OPEN — warn, return `false`, never throw. The
+ * warning names the consequence in plain words, because §3.9 requires a
+ * gate that fails open to say it is not enforced rather than leave a
+ * reader to infer it; the returned boolean is what lets a caller record
+ * that outcome on a durable surface. This primitive also never creates
+ * the destination directory: state-root creation belongs to the first
+ * operational writer, not to observability (§3.8 — additive
+ * observability never moves a fail direction).
  */
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
@@ -38,7 +41,11 @@ export function appendAuditRecord(stateRoot: string, input: AuditInput): boolean
 		return true;
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
-		console.warn(`[ghjig] audit append degraded open (§3.9): ${reason}`);
+		console.warn(
+			`[ghjig] audit append failed: no audit evidence is being recorded for this run — ` +
+				`the audit trail is NOT ENFORCED. Degrading open rather than blocking (§3.9). ` +
+				`Cause: ${reason}`,
+		);
 		return false;
 	}
 }

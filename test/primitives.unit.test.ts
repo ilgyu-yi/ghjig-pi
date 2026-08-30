@@ -13,7 +13,10 @@
  *                   `seamActive: true`; malformed/unusable seam → refusal,
  *                   never a fallback to the operational sink (§5.5, §3.9).
  *   - locate.ts   — self-location from the installed module path: cwd-
- *                   independent, immune to decoy ambient variables (§4.6).
+ *                   independent, immune to decoy ambient variables (§4.6),
+ *                   and bounded below by the install root so a `.pi/`
+ *                   inside the install tree can never become the
+ *                   repository root (§4.7).
  *   - postures.ts — the §3.9 fail-posture inventory: exactly the three
  *                   shipped dependencies, each with a posture, and every
  *                   fail-closed row with an in-place justification.
@@ -25,7 +28,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { appendAuditRecord } from "../.pi/extensions/ghjig/audit.ts";
-import { locateRepoRoot } from "../.pi/extensions/ghjig/locate.ts";
+import { locateRepoRoot, locateRepoRootFrom } from "../.pi/extensions/ghjig/locate.ts";
 import { POSTURES } from "../.pi/extensions/ghjig/postures.ts";
 import { resolveStateRoot } from "../.pi/extensions/ghjig/state-root.ts";
 
@@ -35,6 +38,20 @@ const DECOY_VARS = ["GHJIG_ROOT", "GHJIG_STATE_ROOT", "GHJIG_PI_ROOT", "PI_STATE
 const MANAGED_VARS = [SEAM, ...DECOY_VARS];
 
 let savedEnv: Record<string, string | undefined>;
+
+/** Runs `fn` with console.warn captured — degradation signals are assertable evidence. */
+function captureWarnings<T>(fn: () => T): { value: T; warnings: string[] } {
+	const warnings: string[] = [];
+	const original = console.warn;
+	console.warn = (...args: unknown[]): void => {
+		warnings.push(args.map((arg) => String(arg)).join(" "));
+	};
+	try {
+		return { value: fn(), warnings };
+	} finally {
+		console.warn = original;
+	}
+}
 
 beforeEach(() => {
 	savedEnv = {};
@@ -106,9 +123,21 @@ describe("audit primitive: one-line encoded records (§5.5)", () => {
 		const missing = join(root, "no-such-dir", "deeper");
 		let outcome = true;
 		assert.doesNotThrow(() => {
-			outcome = appendAuditRecord(missing, { category: "test", action: "degrade", text: "x" });
+			outcome = captureWarnings(() =>
+				appendAuditRecord(missing, { category: "test", action: "degrade", text: "x" }),
+			).value;
 		});
 		assert.equal(outcome, false, "a failed append must report failure, not success");
+	});
+
+	it("says plainly that nothing is being recorded when the append degrades open (§3.9)", () => {
+		const missing = join(root, "no-such-dir", "deeper");
+		const { warnings } = captureWarnings(() =>
+			appendAuditRecord(missing, { category: "test", action: "degrade", text: "x" }),
+		);
+		assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
+		assert.match(warnings[0], /no audit evidence is being recorded/);
+		assert.match(warnings[0], /NOT ENFORCED/);
 	});
 });
 
@@ -138,6 +167,28 @@ describe("state-root resolution matrix (§5.5, §4.6)", () => {
 	it("refuses a malformed seam (relative path) instead of falling back", () => {
 		process.env[SEAM] = "relative/state-root";
 		assert.throws(() => resolveStateRoot());
+	});
+
+	it("refuses an empty seam instead of selecting the operational root (§3.9)", () => {
+		// Set-but-empty is present-and-unmeasurable, not unset: the fail-closed
+		// arm owns it, or a test context silently writes the operational sink.
+		process.env[SEAM] = "";
+		assert.throws(
+			() => resolveStateRoot(),
+			/is set but not an absolute path \(empty value\)/,
+			"an empty seam must refuse, not fall back to the operational state root",
+		);
+	});
+
+	it("names a live recovery in every refusal message (§3.11)", () => {
+		const recovery = new RegExp(
+			`Recovery: unset ${SEAM} to use the operational state root, ` +
+				`or point it at an existing absolute directory\\.`,
+		);
+		process.env[SEAM] = "relative/state-root";
+		assert.throws(() => resolveStateRoot(), recovery, "the relative-seam arm prescribes no fix");
+		process.env[SEAM] = join(tmpdir(), "ghjig-no-such-seam-target");
+		assert.throws(() => resolveStateRoot(), recovery, "the missing-target arm prescribes no fix");
 	});
 
 	it("refuses an unusable seam target (existing regular file) instead of falling back", () => {
@@ -218,6 +269,64 @@ describe("locate: cwd-independence and decoy-env immunity (§4.6)", () => {
 			});
 		} finally {
 			rmSync(decoy, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("locate: candidate admissibility bound (§4.7)", () => {
+	/** Lays out an install shape `<root>/<prefix>/.pi/extensions/ghjig/locate.ts`. */
+	function installTree(prefix: string): { root: string; moduleFile: string; installDir: string } {
+		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
+		const installDir = join(root, prefix, ".pi", "extensions", "ghjig");
+		mkdirSync(installDir, { recursive: true });
+		const moduleFile = join(installDir, "locate.ts");
+		writeFileSync(moduleFile, "// stand-in for the installed module\n");
+		return { root, moduleFile, installDir };
+	}
+
+	it("rejects a .pi/ directory below the install root and keeps walking", () => {
+		const { root, moduleFile, installDir } = installTree(".");
+		try {
+			// One empty, git-invisible directory is the whole attack: without the
+			// bound it becomes the repository root and the evidence sink moves.
+			mkdirSync(join(installDir, ".pi"));
+			const { value, warnings } = captureWarnings(() => locateRepoRootFrom(moduleFile));
+			assert.equal(value, root, "a .pi/ below the install root must never be adopted as the repo root");
+			assert.equal(warnings.length, 1, `expected one rejection warning, got ${JSON.stringify(warnings)}`);
+			assert.match(warnings[0], /it sits below the install root/);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("still accepts a .pi/ ancestor above the install root (upper bound unmoved)", () => {
+		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
+		try {
+			mkdirSync(join(root, ".pi"));
+			const deep = join(root, "x", "nested", "a", "b");
+			mkdirSync(deep, { recursive: true });
+			const moduleFile = join(deep, "locate.ts");
+			writeFileSync(moduleFile, "// stand-in for the installed module\n");
+			// structuralRoot is <root>/x; the only .pi/ sits one level higher.
+			assert.equal(captureWarnings(() => locateRepoRootFrom(moduleFile)).value, root);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("degrades open to the structural root when no admissible .pi/ ancestor exists (§3.9)", () => {
+		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
+		try {
+			const deep = join(root, "x", "nested", "a", "b");
+			mkdirSync(deep, { recursive: true });
+			const moduleFile = join(deep, "locate.ts");
+			writeFileSync(moduleFile, "// stand-in for the installed module\n");
+			const { value, warnings } = captureWarnings(() => locateRepoRootFrom(moduleFile));
+			assert.equal(value, join(root, "x"), "the structural root the install layout implies");
+			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
+			assert.match(warnings[0], /repo-root discovery failed/);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
 		}
 	});
 });

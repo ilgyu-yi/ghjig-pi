@@ -1,0 +1,5 @@
+# Shell-created untracked state, excluded at creation rather than by
+# convention (SPEC §4.7). `.ghjig/` holds this repository's own per-clone
+# binding state and the operational evidence root `.ghjig/state/` the
+# runtime writes; neither is ever committed (§5.5).
+.ghjig/

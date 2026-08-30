@@ -10,8 +10,15 @@
  *     with `action` markers ordered `ext-load` → `session-start`, plus a
  *     `seam-active` announcement when the test seam is active (§4.6, §5.5);
  *   - a post-session_start session entry `customType: "ghjig-registration"`
- *     with `data: { repoRoot, stateRoot, seamActive }` (§5.9; spike:
- *     appendEntry is an action method, legal only after session_start);
+ *     with `data: { repoRoot, stateRoot, seamActive, auditWritable }` (§5.9;
+ *     spike: appendEntry is an action method, legal only after
+ *     session_start);
+ *   - the fail-closed `seam-target` posture end to end: a seam that is set
+ *     but unusable refuses the run and names its own recovery, reached
+ *     through the harness's explicit `seamOverride` opt-in (§3.9, §3.11);
+ *   - the harness's own seam integrity: `RunOptions.env` cannot replace
+ *     `GHJIG_TEST_STATE_ROOT`, so nothing but an explicit opt-in moves a
+ *     run's state root (§4.6);
  *   - no action method at extension load, checked against the D1-calibrated
  *     failure class (§3.2; §3.9 refuse-not-approve);
  *   - D2 tree isolation: `git status --porcelain` identical before/after,
@@ -60,7 +67,14 @@ export default function violating(pi: ExtensionAPI) {
 
 interface RegistrationEntry {
 	customType: string;
-	data: { repoRoot: string; stateRoot: string; seamActive: boolean };
+	data: { repoRoot: string; stateRoot: string; seamActive: boolean; auditWritable: boolean };
+}
+
+interface AuditRecord {
+	timestamp: string;
+	category: string;
+	action: string;
+	text: string;
 }
 
 function registrationEntries(fixture: Fixture): RegistrationEntry[] {
@@ -91,6 +105,10 @@ let pollutedFixture: Fixture;
 let pollutedRun: PiRunResult;
 let seamDecoyFixture: Fixture;
 let seamDecoyRun: PiRunResult;
+let relativeSeamFixture: Fixture;
+let relativeSeamRun: PiRunResult;
+let emptySeamFixture: Fixture;
+let emptySeamRun: PiRunResult;
 let decoyTree: string;
 let decoyEntriesBefore: string[];
 
@@ -130,6 +148,13 @@ before(async () => {
 	seamDecoyRun = await runPi(seamDecoyFixture, {
 		env: { GHJIG_TEST_STATE_ROOT: "relative/state-root" },
 	});
+
+	// Runs 5 and 6: the fail-closed `seam-target` row, driven end to end
+	// through the explicit opt-in — a relative seam and an empty one.
+	relativeSeamFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	relativeSeamRun = await runPi(relativeSeamFixture, { seamOverride: "relative/state-root" });
+	emptySeamFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	emptySeamRun = await runPi(emptySeamFixture, { seamOverride: "" });
 });
 
 after(() => {
@@ -137,6 +162,8 @@ after(() => {
 	removeFixture(d1Fixture);
 	removeFixture(pollutedFixture);
 	removeFixture(seamDecoyFixture);
+	removeFixture(relativeSeamFixture);
+	removeFixture(emptySeamFixture);
 	rmSync(decoyTree, { recursive: true, force: true });
 });
 
@@ -196,6 +223,13 @@ describe("AC2/AC4: seam-scoped state with self-announcing override (§5.5, §4.6
 		assert.equal(entry?.data.seamActive, true, diagnostics(cleanRun));
 	});
 
+	it("reports the audit append outcome on the session entry (§3.9, §5.9)", () => {
+		// The audit sink fails open, so a reader of the durable record must be
+		// able to tell a live sink from a dead one without the console.
+		const [entry] = registrationEntries(cleanFixture);
+		assert.equal(entry?.data.auditWritable, true, diagnostics(cleanRun));
+	});
+
 	it("self-locates the repository root from the installed tree", () => {
 		const [entry] = registrationEntries(cleanFixture);
 		assert.equal(entry?.data.repoRoot, repoRoot(), diagnostics(cleanRun));
@@ -210,7 +244,7 @@ describe("AC3: audit record encoding, demonstrated on the live run (§5.5)", () 
 		}
 	});
 
-	it("encodes free text so no record spans lines (fields present on every record)", () => {
+	it("stamps every record with timestamp, category, action, and text", () => {
 		for (const line of requireAudit(cleanFixture, cleanRun)) {
 			const record = JSON.parse(line) as Record<string, unknown>;
 			assert.ok(
@@ -221,6 +255,24 @@ describe("AC3: audit record encoding, demonstrated on the live run (§5.5)", () 
 				`incomplete audit record: ${line}`,
 			);
 		}
+	});
+
+	it("keeps a record whose free text carries a quote and a newline on one line", () => {
+		const lines = requireAudit(cleanFixture, cleanRun);
+		// Parsing is the measurement: unencoded free text splits the ext-load
+		// record across lines, and the fragments stop being JSON objects.
+		const records = lines.map((line) => JSON.parse(line) as AuditRecord);
+		const loadMarker = records.find((record) => record.action === "ext-load");
+		assert.ok(loadMarker !== undefined, `no ext-load record among ${JSON.stringify(records)}`);
+		assert.ok(
+			loadMarker.text.includes('"') && loadMarker.text.includes("\n"),
+			`the ext-load marker must carry characters JSON encoding alters, else this arm demonstrates nothing on a live run; got ${JSON.stringify(loadMarker.text)}`,
+		);
+		assert.equal(
+			lines.filter((line) => line.includes("ext-load")).length,
+			1,
+			`the ext-load record must occupy exactly one line; lines: ${JSON.stringify(lines)}`,
+		);
 	});
 });
 
@@ -253,6 +305,34 @@ describe("AC4: polluted ambient environment (§4.6)", () => {
 
 	it("adds zero entries to the decoy tree", () => {
 		assert.deepEqual(listTreeEntries(decoyTree), decoyEntriesBefore);
+	});
+});
+
+describe("AC5: an unusable seam refuses the run end to end (§3.9 seam-target, §5.5)", () => {
+	const REFUSAL = /GHJIG_TEST_STATE_ROOT is set but not an absolute path/;
+	const RECOVERY =
+		/Recovery: unset GHJIG_TEST_STATE_ROOT to use the operational state root, or point it at an existing absolute directory\./;
+
+	it("refuses a relative seam: non-zero exit, no fallback to the operational root", () => {
+		assert.notEqual(relativeSeamRun.exitCode, 0, diagnostics(relativeSeamRun));
+		assert.match(relativeSeamRun.stderr, REFUSAL, diagnostics(relativeSeamRun));
+	});
+
+	it("refuses an empty seam rather than selecting the operational root", () => {
+		// Set-but-empty is the shape that used to slip through into the
+		// operational evidence surface from a test context.
+		assert.notEqual(emptySeamRun.exitCode, 0, diagnostics(emptySeamRun));
+		assert.match(emptySeamRun.stderr, REFUSAL, diagnostics(emptySeamRun));
+	});
+
+	it("names a live recovery on the refusal an operator actually sees (§3.11)", () => {
+		assert.match(relativeSeamRun.stderr, RECOVERY, diagnostics(relativeSeamRun));
+		assert.match(emptySeamRun.stderr, RECOVERY, diagnostics(emptySeamRun));
+	});
+
+	it("writes no session registration on a refused run", () => {
+		assert.equal(registrationEntries(relativeSeamFixture).length, 0, diagnostics(relativeSeamRun));
+		assert.equal(registrationEntries(emptySeamFixture).length, 0, diagnostics(emptySeamRun));
 	});
 });
 

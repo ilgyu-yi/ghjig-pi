@@ -15,7 +15,8 @@ export interface PostureRow {
 export const POSTURES: readonly PostureRow[] = [
 	{
 		dependency: "repo-root-discovery",
-		failureShape: "no .pi/ ancestor above the installed module",
+		failureShape:
+			"no admissible .pi/ ancestor above the installed module (a .pi/ below the install root is rejected, never a root — §4.7)",
 		posture: "open",
 		justification:
 			"Absent means never installed; the actor cannot repair the installation from inside a block (§3.9).",
@@ -29,7 +30,7 @@ export const POSTURES: readonly PostureRow[] = [
 	},
 	{
 		dependency: "seam-target",
-		failureShape: "GHJIG_TEST_STATE_ROOT set but relative, missing, or not a directory",
+		failureShape: "GHJIG_TEST_STATE_ROOT set but empty, relative, missing, or not a directory",
 		posture: "closed",
 		justification:
 			"Present but cannot measure refuses the run (§3.9); a fallback would write the operational evidence surface from a test context — exactly what §5.5 forbids.",
