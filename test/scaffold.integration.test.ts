@@ -12,7 +12,8 @@
  *   - a post-session_start session entry `customType: "ghjig-registration"`
  *     with `data: { repoRoot, stateRoot, seamActive, auditWritable }` (§5.9;
  *     spike: appendEntry is an action method, legal only after
- *     session_start);
+ *     session_start), reported two-sided: `true` on a live sink and `false`
+ *     on a dead one, so the derivation is pinned and not just the field;
  *   - the fail-closed `seam-target` posture end to end: a seam that is set
  *     but unusable refuses the run and names its own recovery, reached
  *     through the harness's explicit `seamOverride` opt-in (§3.9, §3.11);
@@ -35,6 +36,10 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+// The audit destination name comes from the runtime itself: the dead-sink arm
+// blocks exactly the path the runtime appends to, so a rename there moves the
+// block with it instead of silently unblocking the append.
+import { AUDIT_FILE_NAME } from "../.pi/extensions/ghjig/audit.ts";
 import {
 	buildFixture,
 	type Fixture,
@@ -109,6 +114,8 @@ let relativeSeamFixture: Fixture;
 let relativeSeamRun: PiRunResult;
 let emptySeamFixture: Fixture;
 let emptySeamRun: PiRunResult;
+let deadSinkFixture: Fixture;
+let deadSinkRun: PiRunResult;
 let decoyTree: string;
 let decoyEntriesBefore: string[];
 
@@ -155,6 +162,18 @@ before(async () => {
 	relativeSeamRun = await runPi(relativeSeamFixture, { seamOverride: "relative/state-root" });
 	emptySeamFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
 	emptySeamRun = await runPi(emptySeamFixture, { seamOverride: "" });
+
+	// Run 7: a usable seam whose audit sink underneath is dead. The seam
+	// directory is real, writable and passes every `seam-target` check, while
+	// the audit destination inside it is pre-created as a DIRECTORY, so every
+	// append fails with EISDIR. The mechanism is deliberately permission-free:
+	// a mode-0500 seam would still admit the append for uid 0 and false-red
+	// this arm in a root CI container, and a check that can false-red is
+	// itself a defect (§3.12).
+	deadSinkFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	const deadSinkSeam = join(deadSinkFixture.root, "dead-sink-state");
+	mkdirSync(join(deadSinkSeam, AUDIT_FILE_NAME), { recursive: true });
+	deadSinkRun = await runPi(deadSinkFixture, { seamOverride: deadSinkSeam });
 });
 
 after(() => {
@@ -164,6 +183,7 @@ after(() => {
 	removeFixture(seamDecoyFixture);
 	removeFixture(relativeSeamFixture);
 	removeFixture(emptySeamFixture);
+	removeFixture(deadSinkFixture);
 	rmSync(decoyTree, { recursive: true, force: true });
 });
 
@@ -233,6 +253,21 @@ describe("AC2/AC4: seam-scoped state with self-announcing override (§5.5, §4.6
 	it("self-locates the repository root from the installed tree", () => {
 		const [entry] = registrationEntries(cleanFixture);
 		assert.equal(entry?.data.repoRoot, repoRoot(), diagnostics(cleanRun));
+	});
+});
+
+describe("AC2/AC4: a dead audit sink is reported, not hidden (§3.9, §5.9)", () => {
+	it("completes the session anyway — the audit sink fails open (§3.9)", () => {
+		// The reported outcome is observability; it must not move the fail
+		// direction. A dead sink degrades, it never refuses.
+		assert.equal(deadSinkRun.exitCode, 0, diagnostics(deadSinkRun));
+	});
+
+	it("reports auditWritable: false when every append degrades open", () => {
+		// The counterpart of the live-sink arm above. Without this side the
+		// field could be a constant `true` and no assertion would notice.
+		const [entry] = registrationEntries(deadSinkFixture);
+		assert.equal(entry?.data.auditWritable, false, diagnostics(deadSinkRun));
 	});
 });
 

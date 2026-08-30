@@ -1,5 +1,7 @@
 # Shell-created untracked state, excluded at creation rather than by
-# convention (SPEC §4.7). `.ghjig/` holds this repository's own per-clone
-# binding state and the operational evidence root `.ghjig/state/` the
-# runtime writes; neither is ever committed (§5.5).
-.ghjig/
+# convention (SPEC §4.7). The repository-root `.ghjig/` holds this clone's
+# own binding state and the operational evidence root `.ghjig/state/` the
+# runtime writes; neither is ever committed (§5.5). The pattern is anchored
+# because the runtime computes that path at the repository root and nowhere
+# else, so the exclusion covers exactly what the shell creates.
+/.ghjig/
