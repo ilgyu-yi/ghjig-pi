@@ -35,35 +35,35 @@ This document is the repository's behavioural SSOT: every enforced norm, gate cl
 | &nbsp;&nbsp;§3.1 | The constraint | 310 |
 | &nbsp;&nbsp;§3.2 | The three tiers | 317 |
 | &nbsp;&nbsp;§3.3 | Gate classes | 325 |
-| &nbsp;&nbsp;§3.4 | Agent-agnosticism of the tiers | 346 |
-| &nbsp;&nbsp;§3.5 | Gate conduct | 350 |
-| &nbsp;&nbsp;§3.6 | Enforcement-face selection | 354 |
-| &nbsp;&nbsp;§3.7 | Approval-gate completeness | 364 |
-| &nbsp;&nbsp;§3.8 | Escape architecture | 376 |
-| &nbsp;&nbsp;§3.9 | Fail policy | 387 |
-| &nbsp;&nbsp;§3.10 | Delegated computation | 397 |
-| &nbsp;&nbsp;§3.11 | Gate design | 407 |
-| &nbsp;&nbsp;§3.12 | Gate verification | 429 |
-| §4 | Substrate and install contract | 439 |
-| &nbsp;&nbsp;§4.1 | Namespaces | 443 |
-| &nbsp;&nbsp;§4.2 | Target-parameterization | 447 |
-| &nbsp;&nbsp;§4.3 | PR-based installs | 451 |
-| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 455 |
-| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 459 |
-| &nbsp;&nbsp;§4.6 | Binding and resolution | 465 |
-| &nbsp;&nbsp;§4.7 | Host boundary | 475 |
-| §5 | Cross-cutting contracts | 483 |
-| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 487 |
-| &nbsp;&nbsp;§5.2 | Graceful degradation | 491 |
-| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 495 |
-| &nbsp;&nbsp;§5.4 | Work language | 499 |
-| &nbsp;&nbsp;§5.5 | State boundary | 503 |
-| &nbsp;&nbsp;§5.6 | Operating modes | 509 |
-| &nbsp;&nbsp;§5.7 | Unattended conduct | 519 |
-| &nbsp;&nbsp;§5.8 | Context lifecycle | 529 |
-| &nbsp;&nbsp;§5.9 | Session surfaces | 537 |
-| §6 | Self-governance milestone | 545 |
-| &nbsp;&nbsp;§6.1 | Substrate posture | 556 |
+| &nbsp;&nbsp;§3.4 | Agent-agnosticism of the tiers | 356 |
+| &nbsp;&nbsp;§3.5 | Gate conduct | 360 |
+| &nbsp;&nbsp;§3.6 | Enforcement-face selection | 364 |
+| &nbsp;&nbsp;§3.7 | Approval-gate completeness | 374 |
+| &nbsp;&nbsp;§3.8 | Escape architecture | 386 |
+| &nbsp;&nbsp;§3.9 | Fail policy | 397 |
+| &nbsp;&nbsp;§3.10 | Delegated computation | 407 |
+| &nbsp;&nbsp;§3.11 | Gate design | 417 |
+| &nbsp;&nbsp;§3.12 | Gate verification | 439 |
+| §4 | Substrate and install contract | 449 |
+| &nbsp;&nbsp;§4.1 | Namespaces | 453 |
+| &nbsp;&nbsp;§4.2 | Target-parameterization | 457 |
+| &nbsp;&nbsp;§4.3 | PR-based installs | 461 |
+| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 465 |
+| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 469 |
+| &nbsp;&nbsp;§4.6 | Binding and resolution | 475 |
+| &nbsp;&nbsp;§4.7 | Host boundary | 485 |
+| §5 | Cross-cutting contracts | 493 |
+| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 497 |
+| &nbsp;&nbsp;§5.2 | Graceful degradation | 501 |
+| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 505 |
+| &nbsp;&nbsp;§5.4 | Work language | 509 |
+| &nbsp;&nbsp;§5.5 | State boundary | 513 |
+| &nbsp;&nbsp;§5.6 | Operating modes | 519 |
+| &nbsp;&nbsp;§5.7 | Unattended conduct | 529 |
+| &nbsp;&nbsp;§5.8 | Context lifecycle | 539 |
+| &nbsp;&nbsp;§5.9 | Session surfaces | 547 |
+| §6 | Self-governance milestone | 555 |
+| &nbsp;&nbsp;§6.1 | Substrate posture | 566 |
 <!-- TOC END -->
 
 ## 0. Intent and scope
@@ -324,10 +324,18 @@ This section states the first-class design constraint — pi provides no built-i
 
 ### 3.3 Gate classes
 
-The gate classes the enforcement layer commits to, with their current tier homes:
+The gate classes the enforcement layer commits to are recorded in the table below, each row carrying its placement and the information that decides it. Placement is not free-hand:
 
-| Class | Guards against | Tier home (current) |
-|---|---|---|
+**Placement rule.** A class's decision is homed where the information that decides it is **exact** — supplied by the layer being governed, rather than reconstructed from a representation of it. A layer that must infer the decision is not that class's home; at most it carries an advisory echo of a decision taken elsewhere. **Exact** means obtainable at that layer without consulting another layer's representation of the fact: the layer is handed the deciding value or holds it natively, rather than re-deriving it from a rendering another layer produced. The layers are §3.4's — the git layer tier 2 binds at, the platform layer tier 3 binds at, and the substrate session tier 1 rides — and placement is decided over those, minting no second vocabulary for them (§2.7).
+
+**Two shapes of deciding information** beyond the single-layer case. *Distributed* — no one layer holds every part, and the home is the layer at which the **last-needed part becomes exact**, because a decision cannot be taken before all of its inputs are: the latest-arriving part fixes the home, never the earliest. *Redundant* — two or more layers each hold every part, so exactness discriminates nothing and the home is selected among them by §3.11's irreversible-moment clause, then by §3.6's cost asymmetry.
+
+**Composition with §3.11.** Placement decides where a class's *decision* lives and does nothing more: it never relieves an irreversible class of §3.11's unbypassable backstop beneath that decision, and where the two land on different layers the lower call site runs the same predicate as a pre-image, never a second implementation.
+
+**Column shape.** The placement column carries three slots — `home:` the layer the rule selects, with the instrument holding it today or the fact that none does yet; `backstop:` §3.11's unbypassable home, `same` where it coincides with the home, or `none` with the reason none is owed; `earlier:` the pre-image call sites and advisory echoes sitting beneath the home. The deciding-information column carries two — `supplies:` the layer the deciding fact comes from exactly, and `infers:` the nearest layer the rule disqualifies. An empty slot is written `—`, so an omission renders as a short cell **in the row** rather than vanishing from a list. No check enforces this shape mechanically today: the container makes an omission visible, it does not reject one, and the shape is enforced at review (§2.3). Slots stay short — a slot that needs a reason gives the reason in a few words and routes the derivation to the prose beneath the table, because a slot running to several hundred characters defeats the column it sits in.
+
+| Class | Guards against | Tier placement (home / backstop / earlier call sites) | Deciding information (supplies / infers) |
+|---|---|---|---|
 | protected-branch | direct commit/push to the default or release branches | tier 2 (adapters); tier 3 (ruleset — default branch only today); tier 1 planned first |
 | force-push | history rewrites on protected refs | tier 2 (by subsumption); tier 3 (non-fast-forward rule) |
 | secret | committing a staged secret | tier 2 (delegated scan) |
@@ -342,6 +350,8 @@ The gate classes the enforcement layer commits to, with their current tier homes
 | egress | publishing repo-derived text that carries a secret to a public, unretractable surface | procedural today (§3.6 staged face); instruments derive later (§1.2) |
 
 "Planned" rows are commitments, not implementations: each tier-1 gate lands through its own Doc → Test → Code cycle, first the protected-branch class as the walking skeleton. A class with no live gate in any tier is advisory and must be labeled so wherever it is stated.
+
+The placement rule is itself **procedural** (§3.1 rule 1): it binds SPEC authorship, the two rightmost columns of the table above are its only product, and it is enforced at review (§2.3). §3.6's hardening-trigger obligation does not fire on it — that obligation binds irreversible-class norms, and a mis-placed row is a reversible document defect the next amendment repairs.
 
 ### 3.4 Agent-agnosticism of the tiers
 
