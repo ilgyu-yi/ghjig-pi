@@ -35,35 +35,35 @@ This document is the repository's behavioural SSOT: every enforced norm, gate cl
 | &nbsp;&nbsp;§3.1 | The constraint | 310 |
 | &nbsp;&nbsp;§3.2 | The three tiers | 317 |
 | &nbsp;&nbsp;§3.3 | Gate classes | 325 |
-| &nbsp;&nbsp;§3.4 | Agent-agnosticism of the tiers | 346 |
-| &nbsp;&nbsp;§3.5 | Gate conduct | 350 |
-| &nbsp;&nbsp;§3.6 | Enforcement-face selection | 354 |
-| &nbsp;&nbsp;§3.7 | Approval-gate completeness | 364 |
-| &nbsp;&nbsp;§3.8 | Escape architecture | 376 |
-| &nbsp;&nbsp;§3.9 | Fail policy | 387 |
-| &nbsp;&nbsp;§3.10 | Delegated computation | 397 |
-| &nbsp;&nbsp;§3.11 | Gate design | 407 |
-| &nbsp;&nbsp;§3.12 | Gate verification | 429 |
-| §4 | Substrate and install contract | 439 |
-| &nbsp;&nbsp;§4.1 | Namespaces | 443 |
-| &nbsp;&nbsp;§4.2 | Target-parameterization | 447 |
-| &nbsp;&nbsp;§4.3 | PR-based installs | 451 |
-| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 455 |
-| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 459 |
-| &nbsp;&nbsp;§4.6 | Binding and resolution | 465 |
-| &nbsp;&nbsp;§4.7 | Host boundary | 475 |
-| §5 | Cross-cutting contracts | 483 |
-| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 487 |
-| &nbsp;&nbsp;§5.2 | Graceful degradation | 491 |
-| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 495 |
-| &nbsp;&nbsp;§5.4 | Work language | 499 |
-| &nbsp;&nbsp;§5.5 | State boundary | 503 |
-| &nbsp;&nbsp;§5.6 | Operating modes | 509 |
-| &nbsp;&nbsp;§5.7 | Unattended conduct | 519 |
-| &nbsp;&nbsp;§5.8 | Context lifecycle | 529 |
-| &nbsp;&nbsp;§5.9 | Session surfaces | 537 |
-| §6 | Self-governance milestone | 545 |
-| &nbsp;&nbsp;§6.1 | Substrate posture | 556 |
+| &nbsp;&nbsp;§3.4 | Agent-agnosticism of the tiers | 360 |
+| &nbsp;&nbsp;§3.5 | Gate conduct | 364 |
+| &nbsp;&nbsp;§3.6 | Enforcement-face selection | 368 |
+| &nbsp;&nbsp;§3.7 | Approval-gate completeness | 378 |
+| &nbsp;&nbsp;§3.8 | Escape architecture | 390 |
+| &nbsp;&nbsp;§3.9 | Fail policy | 401 |
+| &nbsp;&nbsp;§3.10 | Delegated computation | 411 |
+| &nbsp;&nbsp;§3.11 | Gate design | 421 |
+| &nbsp;&nbsp;§3.12 | Gate verification | 443 |
+| §4 | Substrate and install contract | 453 |
+| &nbsp;&nbsp;§4.1 | Namespaces | 457 |
+| &nbsp;&nbsp;§4.2 | Target-parameterization | 461 |
+| &nbsp;&nbsp;§4.3 | PR-based installs | 465 |
+| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 469 |
+| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 473 |
+| &nbsp;&nbsp;§4.6 | Binding and resolution | 479 |
+| &nbsp;&nbsp;§4.7 | Host boundary | 489 |
+| §5 | Cross-cutting contracts | 497 |
+| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 501 |
+| &nbsp;&nbsp;§5.2 | Graceful degradation | 505 |
+| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 509 |
+| &nbsp;&nbsp;§5.4 | Work language | 513 |
+| &nbsp;&nbsp;§5.5 | State boundary | 517 |
+| &nbsp;&nbsp;§5.6 | Operating modes | 523 |
+| &nbsp;&nbsp;§5.7 | Unattended conduct | 533 |
+| &nbsp;&nbsp;§5.8 | Context lifecycle | 543 |
+| &nbsp;&nbsp;§5.9 | Session surfaces | 551 |
+| §6 | Self-governance milestone | 559 |
+| &nbsp;&nbsp;§6.1 | Substrate posture | 570 |
 <!-- TOC END -->
 
 ## 0. Intent and scope
@@ -152,7 +152,7 @@ A reviewer judges from the artifact alone: it is assumed to know nothing of the 
 
 **Verdict grammar.** Verdicts are a fixed machine-readable token set at a defined output position; a new adjudication mechanism collapses into the existing grammar rather than minting tokens. Verdict content stays content-only — rounds, filer identity, and dispatch provenance are caller-derived (§1.4). A finding on a heuristic axis is structurally advisory: it never escalates to the blocking verdict token and never feeds a round counter — the ceiling is drawn in the grammar, not left to reviewer judgment.
 
-The norm is **procedural today** — homed with the `merge-review` row in §3.3, whose gate it feeds — review-enforced (§2.3) until tier-1 instruments derive per §1.2's macro-phase clause.
+The norm is **procedural today** — homed with the `merge-review` row in §3.3, whose gate it feeds — review-enforced (§2.3) until instruments derive per §1.2's macro-phase clause.
 
 ### 1.7 High-asymmetry quorum
 
@@ -320,32 +320,46 @@ This section states the first-class design constraint — pi provides no built-i
 
 **Tier 2 — the local git-hook tier.** The committed `.githooks/` adapters (`pre-commit`, `pre-push`, `commit-msg`) bind any local git operation — human, script, or any agent harness — once a clone activates them (`core.hooksPath=.githooks`). This is an **advice tier**: it folds to `--no-verify` by design, and a clone with no shell binding no-ops rather than wedging git. The adapters carry no check logic; they delegate through the contract declared in `.githooks/_lib.sh`: a per-clone, untracked adapter (`.ghjig/shell-adapter.sh`) provides the runtime (`safe_source`, `audit_log`) and a helper directory supplying the delegated checks (branch guarding, staged-secret scanning, commit-subject grammar). A present-but-incomplete helper degrades to allow, never to a false block.
 
-**Tier 3 — CI gates and the server-side ruleset.** The workflow gates (`fragment-gate`, `ssot-home`, `toc-freshness`) run as required status checks, and the branch ruleset adds the merge-commit-only method on the default branch (§1.1), non-fast-forward history, deletion protection, and review-thread resolution. This tier is the **hard floor**: it binds every contributor and every clone, including one where tiers 1–2 are absent or bypassed.
+**Tier 3 — CI gates and the server-side ruleset.** The workflow gates (`fragment-gate`, `ssot-home`, `toc-freshness`) run as required status checks, and the branch ruleset, scoped to the default branch, requires every change to arrive through a pull request and adds the merge-commit-only method (§1.1), non-fast-forward history, deletion protection, and review-thread resolution — it requires no approving review. This tier is the **hard floor**: it binds every contributor and every clone, including one where tiers 1–2 are absent or bypassed.
 
 ### 3.3 Gate classes
 
-The gate classes the enforcement layer commits to, with their current tier homes:
+The gate classes the enforcement layer commits to are recorded in the table below, each row carrying its placement and the information that decides it. Placement is not free-hand:
 
-| Class | Guards against | Tier home (current) |
-|---|---|---|
-| protected-branch | direct commit/push to the default or release branches | tier 2 (adapters); tier 3 (ruleset — default branch only today); tier 1 planned first |
-| force-push | history rewrites on protected refs | tier 2 (by subsumption); tier 3 (non-fast-forward rule) |
-| secret | committing a staged secret | tier 2 (delegated scan) |
-| commit-format | malformed commit subjects | tier 2 (delegated grammar check) |
-| changelog | a PR landing with no fragment and no skip label | tier 3 (`fragment-gate`) |
-| ssot-home | contract prose drifting out of the SPEC | tier 3 (`ssot-home`) |
-| toc-freshness | a stale SPEC table of contents | tier 3 (`toc-freshness`) |
-| merge-review | merging without a review pinned at the merged head | procedural today (§2.3); tier 1 planned |
-| ac-closeout | merging a PR whose closing issue has unresolved AC | procedural today (§2.2); tier 1 planned |
-| change-reach | retired SSOT vocabulary surviving the declared-set completion check | procedural today (§2.6); instruments derive later (§1.2) |
-| approval-evidence | a gated approval's terminal action firing without the approval's evidence artifact | procedural today (§3.7); tier 1 planned |
-| egress | publishing repo-derived text that carries a secret to a public, unretractable surface | procedural today (§3.6 staged face); instruments derive later (§1.2) |
+**Placement rule.** The unit of placement is the **guarded act**: a class that guards one act is placed once, and a class that guards more than one is placed once per arm. Each such decision is homed where the information that decides it is **exact** — supplied by the layer being governed, rather than reconstructed from a representation of it. A layer that must infer the decision is not that class's home; at most it carries an advisory echo of a decision taken elsewhere. **Exact** means obtainable at that layer without consulting another layer's representation of the fact: the layer is handed the deciding value or holds it natively, rather than re-deriving it from a rendering another layer produced. The layers are §3.4's — the git layer tier 2 binds at, the platform layer tier 3 binds at, and the substrate session tier 1 rides — and placement is decided over those, minting no second vocabulary for them (§2.7).
 
-"Planned" rows are commitments, not implementations: each tier-1 gate lands through its own Doc → Test → Code cycle, first the protected-branch class as the walking skeleton. A class with no live gate in any tier is advisory and must be labeled so wherever it is stated.
+**Two shapes of deciding information** beyond the single-layer case. *Distributed* — no one layer holds every part, and the home is the layer at which the **last-needed part becomes exact**, because a decision cannot be taken before all of its inputs are: the latest-arriving part fixes the home, never the earliest. *Redundant* — two or more layers each hold every part, so exactness discriminates nothing and the home is selected among them by §3.11's irreversible-moment clause, then by §3.6's cost asymmetry.
+
+**Composition with §3.11.** Placement decides where a class's *decision* lives and does nothing more: it never relieves an irreversible class of §3.11's unbypassable backstop beneath that decision, and where the two land on different layers the lower call site runs the same predicate as a pre-image, never a second implementation. *Home* carries one sense here and another in §3.11, and the two are not rivals: this section's `home:` names the layer a decision is **taken** at, for one guarded act, while §3.11's *owning enforcement point* names the single owner of the class's **predicate**. Placing two acts of one class at two layers therefore adds no second owner — each layer is a call site of that one predicate, or, where a platform-native surface cannot literally share the code, an implementation converged against it (§3.11) — and where those implementations differ in scope, the difference is the residual the row records in place.
+
+**Column shape.** The placement column carries three slots — `home:` the layer the rule selects, with the instrument holding it today or the fact that none does yet; `backstop:` §3.11's unbypassable home, `same` where it coincides with the home, `deferred` where no unbypassable layer evaluates the class's predicate yet and §3.11's amortization carries the gap, or `none` on one of the two reasons §3.11 admits: that none is owed, or that one is owed and no unbypassable layer ever sees the guarded act; `earlier:` the call sites and advisory echoes sitting beneath the home — a call site being either a pre-image of the home's gate or a call site of the class's own predicate over which §3.11's by-construction non-divergence does not hold, and an echo being one that is live or one recorded as planned. The deciding-information column carries two — `supplies:` the layer the deciding fact comes from exactly, or on either shape above every layer it comes from, each exact for what it holds, and `infers:` the nearest layer the rule disqualifies. Where a class's arms differ inside a slot, in either column, that slot is written as `arm: value` pairs separated by `;`; where the arms agree it carries the single value. An empty slot is written `—`, and a cell writes that character for nothing else, so an omission renders as a short cell **in the row** rather than vanishing from a list. No check enforces this shape mechanically today: the container makes an omission visible, it does not reject one, and the shape is enforced at review (§2.3). Slots stay short — a slot that needs a reason gives the reason in a few words and routes the derivation to the prose beneath the table, because a slot running to several hundred characters defeats the column it sits in.
+
+| Class | Guards against | Tier placement (home / backstop / earlier call sites) | Deciding information (supplies / infers) |
+|---|---|---|---|
+| protected-branch | direct commit/push to the default or release branches | `home:` landing: tier 3 (ruleset's pull-request rule; default branch only today, so release branches stay unmodeled, §3.11); commit: tier 2 (adapter committed, its delegated predicate not shipped here yet) · `backstop:` landing: same; commit: none (reversible before publication) · `earlier:` landing: tier 2 call site (`.githooks/pre-push`, delegated predicate not shipped here yet), tier 1 echo planned; commit: tier 1 echo planned | `supplies:` landing: git+platform (target ref); commit: git (the branch `HEAD` is on) / `infers:` session |
+| force-push | rewriting history that is already shared | `home:` tier 3 (ruleset's non-fast-forward rule; default branch only today, so a shared non-default branch stays unmodeled, §3.11) · `backstop:` same · `earlier:` — | `supplies:` git+platform (remote oid) / `infers:` session |
+| secret | committing a staged secret | `home:` tier 2 (adapter committed, its delegated scan not shipped here yet) · `backstop:` deferred (§3.11 amortized) · `earlier:` — | `supplies:` git (the index at commit) / `infers:` session |
+| commit-format | malformed commit subjects | `home:` tier 2 (adapter committed, its delegated grammar check not shipped here yet) · `backstop:` none (reversible) · `earlier:` — | `supplies:` git (message file) / `infers:` session |
+| changelog | a PR landing with no fragment and no skip label | `home:` tier 3 (`fragment-gate`) · `backstop:` same · `earlier:` — | `supplies:` platform (PR files + labels) / `infers:` session |
+| ssot-home | contract prose drifting out of the SPEC | `home:` tier 3 (`ssot-home`) · `backstop:` same · `earlier:` — | `supplies:` platform (PR file set) / `infers:` session |
+| toc-freshness | a stale SPEC table of contents | `home:` tier 3 (`toc-freshness`) · `backstop:` same · `earlier:` — | `supplies:` platform (PR file set) / `infers:` session |
+| merge-review | merging without a review pinned at the merged head | `home:` tier 3 (procedural today, §2.3) · `backstop:` deferred (§3.11 amortized) · `earlier:` tier 1 echo planned | `supplies:` platform (verdict + merged head) / `infers:` session |
+| ac-closeout | merging a PR whose closing issue has unresolved AC | `home:` tier 3 (procedural today, §2.2) · `backstop:` deferred (§3.11 amortized) · `earlier:` tier 1 echo planned | `supplies:` platform (issue AC + merge event) / `infers:` session |
+| change-reach | retired SSOT vocabulary surviving the declared-set completion check | `home:` tier 3 (procedural today, §2.6) · `backstop:` none (reversible) · `earlier:` — | `supplies:` git (trailers) + platform (push history) / `infers:` session |
+| approval-evidence | a gated approval's terminal action firing without the approval's evidence artifact | `home:` tier 3 (procedural today, §3.7) · `backstop:` merge arm: ruleset for the landing itself, approval predicate deferred (§3.11 amortized); other arms: none (reversible) · `earlier:` tier 1 echo planned | `supplies:` platform (evidence artifact + terminal act) / `infers:` session |
+| egress | publishing repo-derived text that carries a secret to a public, unretractable surface | `home:` tier 1 (publish call site; procedural today, §3.6) · `backstop:` none (structurally unavailable, §3.11) · `earlier:` — | `supplies:` session (bytes at the publish call) / `infers:` platform |
+
+**Two families fall out of the rule.** A class whose deciding parts are all exact at the platform — the ref a push will land on, a pull request's file set, a merge event and the artifacts hanging off it — homes at tier 3, because the platform holds the last-needed part and the act guarded is the publication itself. A class whose deciding object exists in git before anything is published, and has no platform representation at the moment its guarded act fires, homes at tier 2 — the platform may read what was eventually pushed, but it cannot read the object the decision is taken over. The families are stated as shapes, never as memberships: each row's home follows from its own deciding information, so a class that acquires a platform representation of its deciding object re-homes without this paragraph changing. Neither family is a partition: a class whose deciding object never leaves the session falls outside both and homes at tier 1 alone (§3.4), and the arms of a class that guards more than one act may fall in different families.
+
+**What the rule moves, and what it merely assigns.** Some rows the rule relocates; others it places for the first time — a row that recorded no tier before is assigned a home rather than moved, and the change claims no more reach than that. `protected-branch` guards two acts and places per arm; `force-push` and `protected-branch`'s landing arm home at tier 3 because git and the platform each hold the deciding fact exactly, so exactness discriminates nothing and the irreversible moment — publication — selects the platform. Both homes are live at the ruleset (§3.2), and the ruleset's default-branch condition is the scope residual each row records in place. `protected-branch`'s commit arm decides on which branch `HEAD` sits when the commit is made: git holds that natively and the platform has no representation of it at that moment, nothing having been published, so that arm's decision is **taken** at tier 2. It is not a pre-image of the landing arm's gate either: §3.11 fixes a pre-image by local and remote not diverging over one act, which is not evaluable for an act the remote gate never sees. The two arms guard different acts, and a local commit is reversible until the landing the other arm gates. What this tree carries at tier 2 is the call-site shape and not yet the check: `.githooks/pre-commit` and `.githooks/pre-push` are committed and call the class's own predicate — the first on the branch `HEAD` is on, the second on each target ref — while the helper they delegate that predicate to is not shipped here, and `.githooks/_lib.sh` no-ops the adapter when it is absent. Tier 1, which can only lex a command string for a fact §3.11 binds to what a ref *is*, is confined to an echo on either arm. `force-push` has no tier-2 call site of its own: its earlier tier-2 entry read *by subsumption*, which is a coverage claim and not an ownership one — §3.11 binds ownership to the predicate, and the adapter shows the local tier evaluates no sharedness predicate at all: `.githooks/pre-push` tests only `is_protected_branch` on the target, and reads the remote oid it is handed as a positional filler explicitly marked unused. What tier 2 blocks there it blocks under the neighbouring class's predicate, so no call site of this row's own predicate sits beneath its home and the `earlier:` slot is empty. `secret` homes at tier 2 not because git is its only layer — the platform can read a pushed commit's content — but because its guarded act is the **commit**, whose deciding object is the index, and the index has no platform representation at that moment. `change-reach` homes at tier 3 on a part worth naming: the declared set arrives as commit trailers, exact in git, but §2.6's pairwise monotonicity is judged over the pull request's push history, which only the platform holds. `approval-evidence` splits by arm — the review-gated merge arm terminates at a blocking platform surface, and the ruleset beneath it blocks a landing that arrives outside a pull request while evaluating no approval predicate, so the landing is backstopped and the approval predicate's backstop stands deferred; the other arms §3.7 names have no such surface and their terminal acts are reversible, so §3.11's backstop obligation does not reach them. And `egress`'s backstop is structurally unavailable rather than deferred: the bytes exist only at the composing publish call, and the platform's first sight of them is the publication the gate exists to precede.
+
+A row whose `home:` slot records that no instrument holds that home yet is a commitment, not an implementation: the gate lands at the recorded home through its own Doc → Test → Code cycle. A class with no live gate in any tier is advisory and must be labeled so wherever it is stated.
+
+The placement rule is itself **procedural** (§3.1 rule 1): it binds SPEC authorship, the two rightmost columns of the table above are its only product, and it is enforced at review (§2.3). §3.6's hardening-trigger obligation does not fire on it — that obligation binds irreversible-class norms, and a mis-placed row is a reversible document defect the next amendment repairs.
 
 ### 3.4 Agent-agnosticism of the tiers
 
-No enforced norm depends on a specific agent or model (MISSION § "Success looks like > Agent-agnosticism"). Tier 2 binds at the git layer and tier 3 at the platform layer — both are indifferent to who or what performed the work. Tier 1 is substrate-specific by nature (it rides pi's extension API), but it narrows the loop rather than defining the floor: a different agent harness operating in the same clone is still bound by tiers 2–3 in full.
+No enforced norm depends on a specific agent or model (MISSION § "Success looks like > Agent-agnosticism"). Tier 2 binds at the git layer and tier 3 at the platform layer — both are indifferent to who or what performed the work. Tier 1 is substrate-specific by nature (it rides pi's extension API), but it narrows the loop rather than defining the floor: a different agent harness operating in the same clone is still bound by tiers 2–3 in full. One residual is named rather than left implied: where a class's deciding information exists only inside the session, tier 1 is its only home (§3.3), so what binds a different harness for that class is the procedural obligation on whatever composes the guarded act, not a tier-2–3 floor.
 
 ### 3.5 Gate conduct
 
@@ -355,7 +369,7 @@ Every blocking message names its positive remediation — the command or path th
 
 Every gate class and every advisory label in this SPEC is the output of one decision procedure: the face of a norm is chosen by the asymmetry in the cost of being wrong. Where a wrong ALLOW is irreversible — the canonical class is a leaked secret; an unreviewed merge is another — and the check is decidable, the face is a hard, narrow, fail-closed gate. Where the check is heuristic, or a wrong BLOCK is costly, the norm is born advisory, its firing observed, and hardened into a gate only on accumulated evidence: **born-advisory → measure → harden**. The loop runs in both directions: faces also migrate back — a gate that fights the prescribed flow is narrowed, and the narrowing pressure is read from escape clustering (§3.8): a category escaped repeatedly is a defect report against the gate, not against its operators. Both pressures are observable only because non-pass verdicts, parks (§5.7), and escapes land as categorized records; an unconsumed record is inert — a wired reader of the aggregate is what completes the positive face.
 
-Two obligations ride every face decision. (i) Wherever a hard gate is stated, its plausible false-block cost is named in the same place — not discovered in operation. (ii) An irreversible-class norm never terminates at guidance alone: guidance for such a class carries a decidable hardening trigger — an observable condition a reader can test — and a named owner for the hardened stage. Guidance with no gate behind it for an irreversible class is a one-sided regression. For the corpus that predates this section, both obligations are satisfied amortized: a §3.3 planned row's own Doc → Test → Code landing cycle is its accepted hardening commitment, the issue that lands it is the named owner, and a pre-existing gate's false-block cost is named at that gate's next amendment.
+Two obligations ride every face decision. (i) Wherever a hard gate is stated, its plausible false-block cost is named in the same place — not discovered in operation. (ii) An irreversible-class norm never terminates at guidance alone: guidance for such a class carries a decidable hardening trigger — an observable condition a reader can test — and a named owner for the hardened stage. Guidance with no gate behind it for an irreversible class is a one-sided regression. For the corpus that predates this section, both obligations are satisfied amortized: the Doc → Test → Code cycle that puts an instrument at the home a §3.3 row records is that row's accepted hardening commitment, the issue that lands it is the named owner, and a pre-existing gate's false-block cost is named at that gate's next amendment.
 
 **Worked application — the egress boundary.** Text authored from repository content and published to a public, unretractable surface — a PR comment or review, an issue body — is an egress boundary, and a leaked secret there is the irreversible wrong-allow class, so the committed face is staged: an explicit redaction obligation at every publish path now, hardened to a fail-closed secret-pattern scan at the publish boundary when any publishing instrument lands — the hardening trigger is that the instrument's first implementation ships the scan with it — the issue landing that first publishing instrument is the hardened stage's named owner — and the scan reuses the same secret-pattern source as the commit-time secret gate (§3.3), single-sourced. The named false-block cost: a review body legitimately quoting a diff that handles key-shaped strings — which is why the scan is boundary-scoped and pattern-ID-reporting, never content-echoing. Egress harm is not only the leaked secret: republished repository content must not trigger platform side effects against uninvolved parties, so a relayed mention or actionable reference is neutralized at every publish path — the same obligation as the redaction, born now and hardened by the same trigger and owner: the first publishing instrument ships neutralization alongside the secret scan, with its own pattern set — mention shapes are not §3.3's secret patterns.
 
@@ -371,7 +385,7 @@ For every gated approval this SPEC commits to — activation flips (§2.2), comp
 - (d) **Evidence provenance** — a passing verdict artifact derives only from a real reviewer run and is never hand-authored; where hand-forgery remains technically possible, the surfaces that would detect it are retained (§1.6's blind-compared self-reported head is one such surface), so a deferred hardening stays measurable rather than blind.
 - (e) **Predicate integrity** — a gate's evidence predicate binds to the artifact's canonical position and shape (its own artifact, its own head or subject binding), never to substring presence: an evidence marker relayed verbatim inside some other trusted artifact must not satisfy a gate, and composers that relay third-party text verbatim neutralize any gate-marker shapes they carry.
 
-The norm is homed as the `approval-evidence` row in §3.3 — procedural today; tier-1 instruments derive later per §1.2's macro-phase clause.
+The norm is homed as the `approval-evidence` row in §3.3, which records its placement per arm — procedural today; instruments derive later per §1.2's macro-phase clause.
 
 ### 3.8 Escape architecture
 
@@ -382,7 +396,7 @@ Escape coverage is total: every blocking gate class has a sanctioned, audited es
 - **Strict on honor, loud on refusal.** The honor path enumerates its full conjunction of conditions — an unknown or missing field makes the artifact malformed and unhonored — while the component that decides whether enforcement stays armed takes no dependency that can fail. Every refusal that examined a sanction leaves exactly one record naming the refusing arm — by name, never by count, and never carrying the guarded content; where nothing was examined, nothing is recorded.
 - **Accountable and observable.** An escape record names who accepts responsibility, not only why. A gate enforced by procedure rather than by a runtime reader emits its own escape record on the bypass path, or its "audited" claim is broken. The audit vocabulary is a superset of the escape vocabulary, and additive observability never moves a fail direction: a failing record write never converts a refusal into an honor.
 
-The norm is **procedural today**, enforced at review (§2.3); escape instruments derive with the tier-1 gates per §1.2's macro-phase clause, and §3.5's escape contract takes this section as its design reference.
+The norm is **procedural today**, enforced at review (§2.3); escape instruments derive with the gates they guard per §1.2's macro-phase clause, and §3.5's escape contract takes this section as its design reference.
 
 ### 3.9 Fail policy
 
@@ -402,11 +416,11 @@ What failing closed *means* depends on the component's role. A **pre-processor**
 
 **Freshness is validated on both operands.** A time-to-live comparison against an unvalidated clock reading is not a bound at all, and the validation precedes the arithmetic its own failure could skip — an error that unwinds past the decision point leaves zero records, the worst failure shape, detectable only by counting records against a known-good control. Failure classes are keyed by **outcome shape, not mechanism**: one intuitive label ("non-numeric") can span several mechanisms with different verdicts, so the guard rejects on shape rather than patching any one mechanism. A guarded surface must not host inputs that can disarm its own guard — a write the guard itself permits must not be able to forge the guard's decisions — and the mitigation for such a class applies **uniformly, with an empty exemption set and a structural lock**, so a new site cannot drift in unguarded.
 
-The norm is **procedural today**, enforced at review (§2.3); instruments derive with the tier-1 gates per §1.2's macro-phase clause.
+The norm is **procedural today**, enforced at review (§2.3); instruments derive with the gates that delegate to them per §1.2's macro-phase clause.
 
 ### 3.11 Gate design
 
-**Enforcement physics.** An irreversible-class norm may not rest on a bypassable tier alone — it needs an unbypassable backstop (§3.2's tier 3), with the local check as that same rule's fast-feedback **pre-image**: one predicate, two call sites. The local check runs the very rule the remote gate runs, so "clean locally" and "clean at the gate" cannot diverge by construction. For the gate classes that predate this section, the backstop obligation is satisfied amortized: each named irreversible class gains its unbypassable home through its own §3.3 derivation cycle, and until then the gap stands as a declared deferral, not an oversight.
+**Enforcement physics.** An irreversible-class norm may not rest on a bypassable tier alone — it needs an unbypassable backstop (§3.2's tier 3), with the local check as that same rule's fast-feedback **pre-image**: one predicate, two call sites. The local check runs the very rule the remote gate runs, so "clean locally" and "clean at the gate" cannot diverge by construction. For the gate classes that predate this section, the backstop obligation is satisfied amortized: each named irreversible class gains its unbypassable home through its own §3.3 derivation cycle, and until then the gap stands as a declared deferral, not an oversight. Where no unbypassable layer ever sees the guarded act, there is no such home to gain, and the class's row records that residual in place (§3.3).
 
 **Ownership and affordances.** Each gate class has exactly one owning enforcement point — ownership binds to the **predicate**: other tiers are call sites of that one rule (or, where a platform-native site cannot literally share code, implementations converged against the recorded shape §4.3 keeps), never second implementations — a second home for the same property is a divergence surface, not redundancy. A remedy's guard mirrors its gate's predicate exactly: a remedy looser than the gate it repairs deadlocks the flow at the gap between them. An evidence producer's predicate is at least as strict as its consumer's, single-sourced — where the two must differ, the producer fails on the retractable side, never the published side. Every enforced gate owes an **in-flow authoring affordance** that repairs rather than reports — a gate with no authoring-side affordance manufactures post-hoc repair commits — and the affordance references the gate's rule source, never re-derives it. A report-only check names the property it does **not** establish, so a green report is never read as the missing guarantee. Gates bind at the irreversible moment, not the authoring moment; an annotation that adds no claim carries no gate; and a ruling that narrows nothing needs no new gate.
 
@@ -470,7 +484,7 @@ Remedy text distinguishes the two gap shapes: one a session restart fixes (the s
 
 **Registry-scoped, fail-open, physically matched.** Enforcement is scoped by a registry of governed paths and is transparently inert outside it — a guardrail, not a sandbox: every scope-guard failure mode fails open, so a broken guard can only under-enforce, never lock the operator out of unrelated work (§5.2's aid direction; the evidence gates inside the scope keep their own fail-closed contracts). Scope matching compares resolved physical paths with boundary normalization, so a symlinked working directory or a path-prefix collision cannot mis-scope enforcement in either direction. And a detector cannot live inside the path whose failure it detects — a broken-binding check reached through that binding never runs in exactly the failure it exists to catch — so that detection relocates to the launch path that runs before the binding is traversed.
 
-The norm is **procedural today**, enforced at review (§2.3); binding instruments derive with the tier-1 gates per §1.2's macro-phase clause.
+The norm is **procedural today**, enforced at review (§2.3); binding instruments derive with the runtime a clone binds to per §1.2's macro-phase clause.
 
 ### 4.7 Host boundary
 
@@ -548,7 +562,7 @@ This section states the criterion for the point at which this repository's own d
 
 The milestone is reached when both hold:
 
-1. **Tier 1 self-applied** — the in-process gate for the protected-branch class (§3.3) loads from this repository's own tree in the sessions that develop this repository, blocking the norm violations it specifies here.
+1. **Tier 1 self-applied** — the in-process gate for a class §3.3 homes at tier 1 loads from this repository's own tree in the sessions that develop this repository, blocking the norm violations it specifies here.
 2. **Tier 2 self-bound** — the per-clone adapter (§3.2) in this repository's development clones binds to the runtime this repository ships, not to any external one.
 
 Until then, an external development environment may govern the working process, under one absolute condition: it never surfaces in committed artifacts (§5.1). After the milestone, this repository is its own first adopter, and every norm in this SPEC is exercised on the shell's own development before any adopter meets it.
