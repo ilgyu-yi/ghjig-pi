@@ -22,14 +22,20 @@
  *     run's state root (§4.6);
  *   - no action method at extension load, checked against the D1-calibrated
  *     failure class (§3.2; §3.9 refuse-not-approve);
- *   - D2 tree isolation: `git status --porcelain` identical before/after,
- *     and the operational state root `<repo>/.ghjig/state/` absent on both
- *     sides (§5.5 — the seam, never the operational sink). The assertion
- *     targets `.ghjig/state/` rather than all of `.ghjig/` because `.ghjig/`
- *     legitimately holds per-clone untracked binding state in a working
- *     clone (§4.1); the runtime's own sink is what must stay untouched.
- *   - polluted-ambient re-run: byte-identical resolution and zero writes
- *     into a decoy tree (§4.6).
+ *   - D2 tree isolation, stated as an invariant rather than as a schedule:
+ *     `git status --porcelain` and the operational state root
+ *     `<repo>/.ghjig/state/` are captured before the runs and must be
+ *     UNCHANGED after them (§5.5 — the seam, never the operational sink).
+ *     Absence is one admissible before-state, never a required one: the
+ *     runtime's own gate creates that directory in a working clone, so an
+ *     absence assertion would be a red that is not a defect (§3.12). The
+ *     assertion targets `.ghjig/state/` rather than all of `.ghjig/`
+ *     because `.ghjig/` legitimately holds per-clone untracked binding
+ *     state (§4.1); the runtime's own sink is what must stay untouched.
+ *   - polluted-ambient re-run: byte-identical resolution, zero writes into
+ *     a decoy tree, and a positive control proving the decoys reached the
+ *     child at all — an arm that measures an unpolluted environment
+ *     measures nothing (§3.12).
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -56,10 +62,40 @@ import {
 } from "./harness/run-pi.ts";
 
 const OPERATIONAL_STATE_ROOT = join(repoRoot(), ".ghjig", "state");
+
+/**
+ * This repository's operational state root, read as a listing.
+ *
+ * Absence reads as an empty listing rather than as a distinct outcome, so the
+ * before/after comparison holds in a clone that has one and in a clone that
+ * does not. The runtime's own gate creates this directory in a working clone;
+ * an assertion that it is absent would go false the day the shell governs its
+ * own development, which is not a defect this suite should report (§3.12).
+ */
+function operationalStateNow(): string[] {
+	return existsSync(OPERATIONAL_STATE_ROOT) ? listTreeEntries(OPERATIONAL_STATE_ROOT) : [];
+}
 const DECOY_VARS = ["GHJIG_ROOT", "GHJIG_STATE_ROOT", "GHJIG_PI_ROOT", "PI_STATE_ROOT"] as const;
 
 const SCRIPT: ScriptTurn[] = [
 	{ kind: "toolCall", name: "bash", arguments: { command: "echo GHJIG_IT_TOOL_RAN" } },
+	{ kind: "text", text: "GHJIG_IT_DONE" },
+];
+
+/**
+ * The polluted run's script: it reports one decoy variable back from inside
+ * the child process.
+ *
+ * The pollution arm is otherwise satisfied by a child that never received the
+ * decoys at all — resolution is trivially unchanged in an environment nothing
+ * changed. Reading the variable at the far end is the positive control that
+ * separates "immune to the pollution" from "never polluted" (§3.12).
+ */
+const DECOY_PROBE = DECOY_VARS[0];
+const POLLUTED_SCRIPT: ScriptTurn[] = [
+	// Braced and bracketed so an unset variable yields a readable empty answer
+	// rather than a failed command: the arm reads the value, never an exit code.
+	{ kind: "toolCall", name: "bash", arguments: { command: `echo "[\${${DECOY_PROBE}:-}]"` } },
 	{ kind: "text", text: "GHJIG_IT_DONE" },
 ];
 
@@ -88,6 +124,22 @@ function registrationEntries(fixture: Fixture): RegistrationEntry[] {
 	) as unknown as RegistrationEntry[];
 }
 
+/** Every tool result the session recorded, as the text the actor saw. */
+function toolResults(fixture: Fixture): string[] {
+	return readSessionEntries(fixture)
+		.filter((entry) => {
+			const message = entry.message as { role?: string } | undefined;
+			return entry.type === "message" && message?.role === "toolResult";
+		})
+		.map((entry) => {
+			const message = entry.message as { content?: Array<{ type: string; text?: string }> };
+			return (message.content ?? [])
+				.filter((part) => part.type === "text")
+				.map((part) => part.text ?? "")
+				.join("\n");
+		});
+}
+
 function diagnostics(result: PiRunResult): string {
 	return `pi ${result.piVersion} exit=${result.exitCode} timedOut=${result.timedOut}\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`;
 }
@@ -101,7 +153,8 @@ function requireAudit(fixture: Fixture, result: PiRunResult): string[] {
 }
 
 let porcelainBefore: string;
-let operationalRootExistedBefore: boolean;
+/** The operational state root's contents before any run — absent reads as empty. */
+let operationalStateBefore: string[];
 let cleanFixture: Fixture;
 let cleanRun: PiRunResult;
 let d1Fixture: Fixture;
@@ -120,9 +173,11 @@ let decoyTree: string;
 let decoyEntriesBefore: string[];
 
 before(async () => {
-	// D2 snapshot — taken before any run.
+	// D2 snapshot — taken before any run. Both halves are recorded as states
+	// to be preserved, not as states to be found: this suite owes the tree
+	// exactly what it was handed (§5.5), and owes it nothing else.
 	porcelainBefore = gitPorcelain();
-	operationalRootExistedBefore = existsSync(OPERATIONAL_STATE_ROOT);
+	operationalStateBefore = operationalStateNow();
 
 	// Run 1: clean scripted session against the repo-tree runtime.
 	cleanFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
@@ -141,7 +196,7 @@ before(async () => {
 	mkdirSync(join(decoyTree, ".ghjig", "state"), { recursive: true });
 	writeFileSync(join(decoyTree, ".pi", "extensions", "look-alike.ts"), "// decoy\n");
 	decoyEntriesBefore = listTreeEntries(decoyTree);
-	pollutedFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	pollutedFixture = buildFixture({ script: POLLUTED_SCRIPT, linkGhjigRuntime: true });
 	const decoyEnv: Record<string, string> = {};
 	for (const name of DECOY_VARS) {
 		decoyEnv[name] = decoyTree;
@@ -250,7 +305,13 @@ describe("AC2/AC4: seam-scoped state with self-announcing override (§5.5, §4.6
 		assert.equal(entry?.data.auditWritable, true, diagnostics(cleanRun));
 	});
 
-	it("self-locates the repository root from the installed tree", () => {
+	it("self-locates to the repository the runtime is installed in, not the one the session runs in", () => {
+		// A deliberate cross-repository arrangement, not an accident of the
+		// fixture: the runtime is reached through a link, so the module belongs
+		// to THIS repository while the session's working directory is a
+		// temporary fixture. Self-location is a property of the installed tree
+		// — it resolves the link and answers about the tree the module really
+		// lives in — and only a fixture where the two differ can measure that.
 		const [entry] = registrationEntries(cleanFixture);
 		assert.equal(entry?.data.repoRoot, repoRoot(), diagnostics(cleanRun));
 	});
@@ -314,6 +375,16 @@ describe("AC3: audit record encoding, demonstrated on the live run (§5.5)", () 
 describe("AC4: polluted ambient environment (§4.6)", () => {
 	it("the polluted run completes (exit 0, no timeout)", () => {
 		assert.equal(pollutedRun.exitCode, 0, diagnostics(pollutedRun));
+	});
+
+	it("positive control: the decoys actually reached the child process", () => {
+		// Everything below measures immunity, and immunity measured in a clean
+		// environment is not measured at all. This arm fails the moment the
+		// decoys stop arriving — which is what makes the other arms evidence.
+		assert.ok(
+			toolResults(pollutedFixture).some((text) => text.includes(`[${decoyTree}]`)),
+			`the child never saw ${DECOY_PROBE}=${decoyTree}; tool results: ${JSON.stringify(toolResults(pollutedFixture))}\n${diagnostics(pollutedRun)}`,
+		);
 	});
 
 	it("resolves the repository root byte-identically to the clean run", () => {
@@ -383,9 +454,12 @@ describe("AC4: the harness seam has exactly one door (§4.6)", () => {
 });
 
 describe("AC2/D2: repository-tree isolation snapshot", () => {
-	it("leaves the operational state root absent (never created by test runs)", () => {
-		assert.equal(operationalRootExistedBefore, false, `${OPERATIONAL_STATE_ROOT} existed before the suite ran`);
-		assert.equal(existsSync(OPERATIONAL_STATE_ROOT), false, `${OPERATIONAL_STATE_ROOT} was created by the suite`);
+	it("leaves this repository's operational state root exactly as it found it", () => {
+		// An invariant, not a schedule: whatever the tree held before the runs,
+		// it holds after them. Every run here resolves its state to a disposable
+		// seam, so the operational sink is never a destination — whether or not
+		// this clone already has one (§5.5).
+		assert.deepEqual(operationalStateNow(), operationalStateBefore);
 	});
 
 	it("leaves git status --porcelain byte-identical to the pre-suite snapshot", () => {
