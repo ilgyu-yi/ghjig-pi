@@ -35,35 +35,35 @@ This document is the repository's behavioural SSOT: every enforced norm, gate cl
 | &nbsp;&nbsp;§3.1 | The constraint | 310 |
 | &nbsp;&nbsp;§3.2 | The three tiers | 317 |
 | &nbsp;&nbsp;§3.3 | Gate classes | 325 |
-| &nbsp;&nbsp;§3.4 | Agent-agnosticism of the tiers | 346 |
-| &nbsp;&nbsp;§3.5 | Gate conduct | 350 |
-| &nbsp;&nbsp;§3.6 | Enforcement-face selection | 354 |
-| &nbsp;&nbsp;§3.7 | Approval-gate completeness | 364 |
-| &nbsp;&nbsp;§3.8 | Escape architecture | 376 |
-| &nbsp;&nbsp;§3.9 | Fail policy | 387 |
-| &nbsp;&nbsp;§3.10 | Delegated computation | 397 |
-| &nbsp;&nbsp;§3.11 | Gate design | 407 |
-| &nbsp;&nbsp;§3.12 | Gate verification | 429 |
-| §4 | Substrate and install contract | 439 |
-| &nbsp;&nbsp;§4.1 | Namespaces | 443 |
-| &nbsp;&nbsp;§4.2 | Target-parameterization | 447 |
-| &nbsp;&nbsp;§4.3 | PR-based installs | 451 |
-| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 455 |
-| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 459 |
-| &nbsp;&nbsp;§4.6 | Binding and resolution | 465 |
-| &nbsp;&nbsp;§4.7 | Host boundary | 475 |
-| §5 | Cross-cutting contracts | 483 |
-| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 487 |
-| &nbsp;&nbsp;§5.2 | Graceful degradation | 491 |
-| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 495 |
-| &nbsp;&nbsp;§5.4 | Work language | 499 |
-| &nbsp;&nbsp;§5.5 | State boundary | 503 |
-| &nbsp;&nbsp;§5.6 | Operating modes | 509 |
-| &nbsp;&nbsp;§5.7 | Unattended conduct | 519 |
-| &nbsp;&nbsp;§5.8 | Context lifecycle | 529 |
-| &nbsp;&nbsp;§5.9 | Session surfaces | 537 |
-| §6 | Self-governance milestone | 545 |
-| &nbsp;&nbsp;§6.1 | Substrate posture | 556 |
+| &nbsp;&nbsp;§3.4 | Agent-agnosticism of the tiers | 348 |
+| &nbsp;&nbsp;§3.5 | Gate conduct | 352 |
+| &nbsp;&nbsp;§3.6 | Enforcement-face selection | 356 |
+| &nbsp;&nbsp;§3.7 | Approval-gate completeness | 366 |
+| &nbsp;&nbsp;§3.8 | Escape architecture | 378 |
+| &nbsp;&nbsp;§3.9 | Fail policy | 393 |
+| &nbsp;&nbsp;§3.10 | Delegated computation | 403 |
+| &nbsp;&nbsp;§3.11 | Gate design | 413 |
+| &nbsp;&nbsp;§3.12 | Gate verification | 435 |
+| §4 | Substrate and install contract | 445 |
+| &nbsp;&nbsp;§4.1 | Namespaces | 449 |
+| &nbsp;&nbsp;§4.2 | Target-parameterization | 453 |
+| &nbsp;&nbsp;§4.3 | PR-based installs | 457 |
+| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 461 |
+| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 465 |
+| &nbsp;&nbsp;§4.6 | Binding and resolution | 471 |
+| &nbsp;&nbsp;§4.7 | Host boundary | 481 |
+| §5 | Cross-cutting contracts | 489 |
+| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 493 |
+| &nbsp;&nbsp;§5.2 | Graceful degradation | 497 |
+| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 501 |
+| &nbsp;&nbsp;§5.4 | Work language | 505 |
+| &nbsp;&nbsp;§5.5 | State boundary | 509 |
+| &nbsp;&nbsp;§5.6 | Operating modes | 515 |
+| &nbsp;&nbsp;§5.7 | Unattended conduct | 525 |
+| &nbsp;&nbsp;§5.8 | Context lifecycle | 535 |
+| &nbsp;&nbsp;§5.9 | Session surfaces | 543 |
+| §6 | Self-governance milestone | 551 |
+| &nbsp;&nbsp;§6.1 | Substrate posture | 562 |
 <!-- TOC END -->
 
 ## 0. Intent and scope
@@ -328,8 +328,8 @@ The gate classes the enforcement layer commits to, with their current tier homes
 
 | Class | Guards against | Tier home (current) |
 |---|---|---|
-| protected-branch | direct commit/push to the default or release branches | tier 2 (adapters); tier 3 (ruleset — default branch only today); tier 1 planned first |
-| force-push | history rewrites on protected refs | tier 2 (by subsumption); tier 3 (non-fast-forward rule) |
+| protected-branch | direct commit/push to the default or release branches | tier 1 (live — default branch only; `release/*` is a declared deferral to tiers 2–3); tier 2 (adapters); tier 3 (ruleset — default branch only today). No in-session escape: the door is the session boundary, declared at §3.8 |
+| force-push | history rewrites on protected refs | tier 1 (by subsumption — the force flags never reach the refspec extractor, so the push is refused as a protected-ref push); tier 2 (by subsumption); tier 3 (non-fast-forward rule) |
 | secret | committing a staged secret | tier 2 (delegated scan) |
 | commit-format | malformed commit subjects | tier 2 (delegated grammar check) |
 | changelog | a PR landing with no fragment and no skip label | tier 3 (`fragment-gate`) |
@@ -341,7 +341,9 @@ The gate classes the enforcement layer commits to, with their current tier homes
 | approval-evidence | a gated approval's terminal action firing without the approval's evidence artifact | procedural today (§3.7); tier 1 planned |
 | egress | publishing repo-derived text that carries a secret to a public, unretractable surface | procedural today (§3.6 staged face); instruments derive later (§1.2) |
 
-"Planned" rows are commitments, not implementations: each tier-1 gate lands through its own Doc → Test → Code cycle, first the protected-branch class as the walking skeleton. A class with no live gate in any tier is advisory and must be labeled so wherever it is stated.
+"Planned" rows are commitments, not implementations: each tier-1 gate lands through its own Doc → Test → Code cycle. The protected-branch class ran that cycle first, as the walking skeleton, and is live — the pattern the remaining rows inherit is a shipped one, not a projected one. A class with no live gate in any tier is advisory and must be labeled so wherever it is stated.
+
+The protected-branch class discharges §3.11's in-flow authoring-affordance obligation with a registered `/ghjig-topic` command: it creates and switches to a correctly-named topic branch, so a blocked actor's next step is one command rather than a manual repair. It references the branch convention (§1.1) as its rule source rather than re-deriving it, and it holds no exemption from the gate: the affordance is admitted on the same terms as any other actor, never through a carve-out written for it. The gate does not examine branch creation, because creating a branch advances no protected ref — so the agreement here is that the affordance needs no special case, not that a check confirms it.
 
 ### 3.4 Agent-agnosticism of the tiers
 
@@ -349,7 +351,7 @@ No enforced norm depends on a specific agent or model (MISSION § "Success looks
 
 ### 3.5 Gate conduct
 
-Every blocking message names its positive remediation — the command or path that satisfies the norm — never a bare refusal (observed shape throughout the shipped gates, e.g. `.githooks/pre-push` and `.github/workflows/check-toc.yml`); the arm-scoped form of this remediation obligation lives at §3.11. Every block, and every sanctioned bypass, is observable: recorded to the audit surface available at that tier (the platform's comment/check surface for tier 3 — and, for a tier-3 sanctioned bypass, the platform's own audit trail (§3.8); the bound runtime's audit log for tier 2 today). A sanctioned escape is scoped, explicit, and logged — a silent bypass channel is a defect; the design norms a sanctioned escape satisfies are §3.8's. Concrete tier-1 escape mechanics are specified with the tier-1 implementation cycle.
+Every blocking message names its positive remediation — the command or path that satisfies the norm — never a bare refusal (observed shape throughout the shipped gates, e.g. `.githooks/pre-push` and `.github/workflows/check-toc.yml`); the arm-scoped form of this remediation obligation lives at §3.11. Every block, and every sanctioned bypass, is observable: recorded to the audit surface available at that tier (the platform's comment/check surface for tier 3 — and, for a tier-3 sanctioned bypass, the platform's own audit trail (§3.8); the bound runtime's audit log for tier 2 today). A sanctioned escape is scoped, explicit, and logged — a silent bypass channel is a defect; the design norms a sanctioned escape satisfies are §3.8's. Each class's door is **located** in its own tier-1 implementation cycle, and a class whose door sits one tier out satisfies that by declaring where — the protected-branch class's is stated at §3.8.
 
 ### 3.6 Enforcement-face selection
 
@@ -375,14 +377,18 @@ The norm is homed as the `approval-evidence` row in §3.3 — procedural today; 
 
 ### 3.8 Escape architecture
 
-Escape coverage is total: every blocking gate class has a sanctioned, audited escape (§3.5) — for the tier-3 gates (§3.2), until an in-repo door is designed, that door is the platform's own audited bypass surface (an administrator acting through the platform's permission model, observable in its audit trail), a declared deferral rather than a silent gap. A gate with no door does not stop work — it converts blocked work into workarounds the flow never observes. The escape's design norms:
+Escape coverage is total: every blocking gate class has a sanctioned, audited escape (§3.5) — but the door is **located**, not necessarily built in the tier that blocks. Where a tier's own door is not yet designed, a door one tier out satisfies the coverage rule as a declared deferral rather than a silent gap, provided the declaration names it: for the tier-3 gates (§3.2) that door is the platform's own audited bypass surface (an administrator acting through the platform's permission model, observable in its audit trail); for a tier-1 gate it is the session boundary, where the tiers below hold the record. A gate with no door does not stop work — it converts blocked work into workarounds the flow never observes. The escape's design norms:
 
 - **Out-of-band.** The sanction travels on a channel the guarded action cannot carry: an escape expressible inside the very command string it authorizes is self-authorizing, and a marker sitting inside quoted data — a commit message quoting the marker, relayed third-party text — never disarms a gate. Where the data/command boundary cannot be resolved, the sanction is not honored.
 - **One-shot, expiring, structurally scoped.** A sanction authorizes one named action, bound to its subject; it is consumed at examination time whether honored or refused — a refused artifact never lingers to be re-evaluated under different conditions — and it expires on its own. Scope is structural: the sanction can only disarm the category it names, never a neighbor.
 - **Strict on honor, loud on refusal.** The honor path enumerates its full conjunction of conditions — an unknown or missing field makes the artifact malformed and unhonored — while the component that decides whether enforcement stays armed takes no dependency that can fail. Every refusal that examined a sanction leaves exactly one record naming the refusing arm — by name, never by count, and never carrying the guarded content; where nothing was examined, nothing is recorded.
 - **Accountable and observable.** An escape record names who accepts responsibility, not only why. A gate enforced by procedure rather than by a runtime reader emits its own escape record on the bypass path, or its "audited" claim is broken. The audit vocabulary is a superset of the escape vocabulary, and additive observability never moves a fail direction: a failing record write never converts a refusal into an honor.
 
-The norm is **procedural today**, enforced at review (§2.3); escape instruments derive with the tier-1 gates per §1.2's macro-phase clause, and §3.5's escape contract takes this section as its design reference.
+**Where the door is — the protected-branch class.** The first tier-1 gate to derive from these norms ships **no in-session escape**, and its door is declared rather than built, the same shape this section already accepts for tier 3. The door for a tier-1 gate is the session boundary: an operator who must act against the gate leaves the session and acts through git directly, where tier 2's adapters and tier 3's ruleset observe the act and hold the record. That is a declared deferral, not a silent gap — tier 1 is in-session mistake prevention and is never the floor (§3.2), so a door one tier down is a door, not an absence.
+
+**Why not an in-session artifact.** An escape a session can mint is a door the acting party holds the key to, while the accountability an escape record owes presumes a person accepting responsibility — and §3.2 concedes that a session able to run shell commands can author any in-tree artifact. The person's door is a terminal; the agent's correct response to a block is to comply. An in-session instrument would also have to keep every property above against a store the governed tree itself can deliver, and a door that does not hold its own properties is worse than a declared absence. The cost is named rather than glossed: §3.6 reads escape clustering as a defect report against the gate, and with the door outside the session that signal scatters across tiers — the block record stays here, the bypass record lands one tier down. Where a class later earns an in-repo door, it is designed against this section in full.
+
+The norm is **procedural today**, enforced at review (§2.3); an escape instrument derives with the tier-1 gate that earns one — §3.6's escape-clustering signal is the trigger, and a class whose door is declared elsewhere has not earned it yet — and §3.5's escape contract takes this section as its design reference.
 
 ### 3.9 Fail policy
 
