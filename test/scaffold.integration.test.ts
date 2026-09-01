@@ -24,8 +24,10 @@
  *     failure class (§3.2; §3.9 refuse-not-approve);
  *   - D2 tree isolation: `git status --porcelain` identical before/after,
  *     and the operational state root `<repo>/.ghjig/state/` in the same
- *     existence state after the suite as before it — the suite creates
- *     nothing there (§5.5 — the seam, never the operational sink). The
+ *     state after the suite as before it — same absence, or the same entry
+ *     list, so a suite appending into a root that already existed is caught
+ *     too, which `/.ghjig/` being git-ignored keeps out of the porcelain
+ *     arm (§5.5 — the seam, never the operational sink). The
  *     assertion targets `.ghjig/state/` rather than all of `.ghjig/` because
  *     `.ghjig/` legitimately holds per-clone untracked binding state in a
  *     working clone (§4.1); the runtime's own sink is what must stay
@@ -61,6 +63,16 @@ import {
 
 const OPERATIONAL_STATE_ROOT = join(repoRoot(), ".ghjig", "state");
 const DECOY_VARS = ["GHJIG_ROOT", "GHJIG_STATE_ROOT", "GHJIG_PI_ROOT", "PI_STATE_ROOT"] as const;
+
+/**
+ * The operational state root as a snapshot: `undefined` when it is absent,
+ * otherwise its full entry list. Existence alone would not catch a suite
+ * that writes INTO a root an operational writer had already created, and
+ * `/.ghjig/` is git-ignored, so the porcelain arm does not catch it either.
+ */
+function operationalSnapshot(): string[] | undefined {
+	return existsSync(OPERATIONAL_STATE_ROOT) ? listTreeEntries(OPERATIONAL_STATE_ROOT) : undefined;
+}
 
 const SCRIPT: ScriptTurn[] = [
 	{ kind: "toolCall", name: "bash", arguments: { command: "echo GHJIG_IT_TOOL_RAN" } },
@@ -118,7 +130,7 @@ function requireAudit(fixture: Fixture, result: PiRunResult): string[] {
 }
 
 let porcelainBefore: string;
-let operationalRootExistedBefore: boolean;
+let operationalBefore: string[] | undefined;
 let cleanFixture: Fixture;
 let cleanRun: PiRunResult;
 let d1Fixture: Fixture;
@@ -139,7 +151,7 @@ let decoyEntriesBefore: string[];
 before(async () => {
 	// D2 snapshot — taken before any run.
 	porcelainBefore = gitPorcelain();
-	operationalRootExistedBefore = existsSync(OPERATIONAL_STATE_ROOT);
+	operationalBefore = operationalSnapshot();
 
 	// Run 1: clean scripted session against the repo-tree runtime.
 	cleanFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
@@ -415,16 +427,20 @@ describe("AC4: the harness seam has exactly one door (§4.6)", () => {
 });
 
 describe("AC2/D2: repository-tree isolation snapshot", () => {
-	it("creates nothing at the operational state root (§5.5)", () => {
+	it("writes nothing at the operational state root (§5.5)", () => {
 		// The claim is about what this suite did, not about what happens to be
-		// on disk: existence after the suite equals existence before it. Stated
-		// as two absolute falses the arm would also fail on a clone where an
+		// on disk: the root after the suite equals the root before it. Stated as
+		// an absolute absence the arm would also fail on a clone where an
 		// operational writer had legitimately created the root, and would stop
-		// measuring the suite the moment such a writer exists.
-		assert.equal(
-			existsSync(OPERATIONAL_STATE_ROOT),
-			operationalRootExistedBefore,
-			`${OPERATIONAL_STATE_ROOT} changed existence across the suite: a test run must resolve state to a disposable root and never touch the operational sink`,
+		// measuring the suite the moment such a writer exists. Stated as mere
+		// existence it would miss the shape it is most owed — a suite appending
+		// into a root that was already there — which `/.ghjig/` being
+		// git-ignored keeps out of the porcelain arm below as well. So the
+		// comparison is the entry list, and absence is one of its values.
+		assert.deepEqual(
+			operationalSnapshot(),
+			operationalBefore,
+			`${OPERATIONAL_STATE_ROOT} changed across the suite: a test run must resolve state to a disposable root and never touch the operational sink`,
 		);
 	});
 

@@ -47,7 +47,7 @@ import { fileURLToPath } from "node:url";
 // The sink's name comes from the runtime itself: an arm that plants a symlink
 // or reads a mode has to address exactly the path the runtime appends to, so a
 // rename there moves the arm with it instead of quietly aiming it elsewhere.
-import { appendAuditRecord, AUDIT_FILE_NAME } from "../.pi/extensions/ghjig/audit.ts";
+import { appendAuditRecord, AUDIT_FILE_NAME, recoveryFor } from "../.pi/extensions/ghjig/audit.ts";
 import { locateRepoRoot, locateRepoRootFrom } from "../.pi/extensions/ghjig/locate.ts";
 import { POSTURES } from "../.pi/extensions/ghjig/postures.ts";
 import { resolveStateRoot } from "../.pi/extensions/ghjig/state-root.ts";
@@ -359,6 +359,101 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		} finally {
 			chmodSync(stateRoot, 0o700);
 			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps the destination-mode recovery off the unsearchable-ancestor shape (§3.11)", {
+		skip:
+			process.platform === "win32"
+				? "POSIX permission bits"
+				: process.getuid?.() === 0
+					? "the directory mode refuses nothing for this account"
+					: false,
+	}, () => {
+		// An ANCESTOR of the destination refuses the search, so the destination
+		// cannot be measured at all — and its own mode already admits this
+		// account. A clause naming it prescribes a chmod that changes nothing:
+		// this shape is unmodelled and belongs to the general arm. Without the
+		// guard that keeps the destination-mode arm off it, the EACCES code
+		// alone would select the dead clause.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-audit-unsearchable-"));
+		const blocked = join(base, "blocked");
+		mkdirSync(blocked);
+		const stateRoot = join(blocked, "state");
+		mkdirSync(stateRoot);
+		try {
+			chmodSync(blocked, 0o000);
+			const { value, warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			assert.equal(value, false, "the arm measures nothing unless the unsearchable ancestor refuses the open");
+			const clause = recoveryClause(warnings[0] ?? "");
+			assert.notEqual(
+				clause === undefined ? undefined : pathNamedIn(clause),
+				stateRoot,
+				`the signal prescribes an act on ${stateRoot}, whose own mode already admits this account: the refusal came from an ancestor that cannot be searched, so performing the clause changes nothing. signal: ${JSON.stringify(warnings[0])}`,
+			);
+		} finally {
+			chmodSync(blocked, 0o700);
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("names a live recovery when the sink's own mode refuses the append (§3.11)", {
+		skip:
+			process.platform === "win32"
+				? "POSIX permission bits"
+				: process.getuid?.() === 0
+					? "the sink mode refuses nothing for this account"
+					: false,
+	}, () => {
+		// The destination directory admits this account and the sink is there:
+		// only the sink's own mode refuses. The live object is that file, and a
+		// clause naming the directory would prescribe a chmod that changes
+		// nothing — while asserting an absence the file sitting there denies.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-sinkmode-"));
+		const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
+		try {
+			writeFileSync(sinkPath, "");
+			chmodSync(sinkPath, 0o000);
+			const { value, warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			assert.equal(value, false, "the arm measures nothing unless the sink's own mode refuses the append");
+			const clause = recoveryClause(warnings[0] ?? "");
+			const named = clause === undefined ? undefined : pathNamedIn(clause);
+			const performed =
+				named === undefined
+					? "no path named"
+					: perform(`made ${named} writable by this account`, () => chmodSync(named, 0o600));
+			assert.equal(
+				captureWarnings(() => appendAuditRecord(stateRoot, INPUT)).value,
+				true,
+				`the signal names a recovery that is dead where it is emitted. signal: ${JSON.stringify(warnings[0])}; recovery clause: ${JSON.stringify(clause)}; performing it: ${performed}`,
+			);
+		} finally {
+			perform("restored the fixture modes", () => {
+				chmodSync(stateRoot, 0o700);
+				chmodSync(sinkPath, 0o600);
+			});
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("routes the delayed-write shapes away from the sink-path recovery (§3.11)", () => {
+		// ENOSPC, EDQUOT, EROFS and EIO reach the selector from the close as
+		// well as from the open — a write the filesystem accepted and then
+		// refused. None is stageable on a test host: no filesystem is filled, no
+		// mount is remounted, no device is broken (§3.12), so the routing is
+		// measured by calling the selector rather than by provoking the failure.
+		// The comparison object is the general arm's own output, taken from a
+		// code it is the arm for; matching it means the operator is told to make
+		// the sink a plain writable file, which for all four it already is.
+		const stateRoot = join(tmpdir(), "ghjig-audit-delayed-write");
+		const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
+		const general = recoveryFor({ code: "ENOTAROUTEDCODE" }, stateRoot, sinkPath);
+		for (const code of ["ENOSPC", "EDQUOT", "EROFS", "EIO"]) {
+			assert.notEqual(
+				recoveryFor({ code }, stateRoot, sinkPath),
+				general,
+				`${code} falls to the general recovery, which prescribes making ${sinkPath} a plain file writable by this account — for this failure it already is one, so the clause names an act that changes nothing: ${general}`,
+			);
 		}
 	});
 });
