@@ -42,7 +42,7 @@ jobs:
             echo "bypass=1" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Validate fragment presence + filename + stem-match
+      - name: Validate fragments against the net PR file listing
         if: steps.label.outputs.bypass != '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -51,89 +51,48 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Allow-set: PR number ∪ closingIssuesReferences (the fragment stem
-          # may be the PR number or a closing issue number —
-          # see changelog_unreleased/TEMPLATE.md).
-          allowed=$(gh pr view "$PR_NUM" --repo "$REPO" \
-            --json number,closingIssuesReferences \
-            --jq '[.number, (.closingIssuesReferences[]?.number)] | unique | .[]')
+          # Two independent fetches now feed the gate, so a flaky external
+          # call is retried with a short backoff and then fails closed with a
+          # message that is explicitly not a missing-fragment failure.
+          fetch_with_retry() {
+            local what=$1
+            shift
+            local attempt=1
+            local out=''
+            while [ "$attempt" -le 3 ]; do
+              if out=$("$@"); then
+                printf '%s' "$out"
+                return 0
+              fi
+              echo "check-changelog: attempt ${attempt} to fetch ${what} failed; retrying." >&2
+              sleep "$((attempt * 2))"
+              attempt=$((attempt + 1))
+            done
+            echo "::error::Failed to fetch ${what} after 3 attempts — the gate could not read the PR. This is NOT a missing-fragment failure; re-run the job." >&2
+            return 1
+          }
 
-          # Find files added under the fragment path shape. `gh pr diff
-          # --patch` shows the unified diff; the `^+++ b/changelog_unreleased
-          # /<cat>/<N>.md$` line captures added paths in the diff with
-          # category and integer-stem already validated by the regex.
-          #
-          # Capture the diff transport status SEPARATELY from the grep:
-          # a trailing `|| true` on the whole pipeline used to conflate a
-          # `gh pr diff` API/transport failure with "no fragment added", blocking
-          # a valid PR with a misleading no-fragment error. A transport failure
-          # is now its own hard error; only the grep's no-match (exit 1) is
-          # allowed to fall through to the empty-`added` branch below.
-          if ! diff_out=$(gh pr diff "$PR_NUM" --repo "$REPO" --patch); then
-            echo "::error::Failed to fetch the PR diff (gh pr diff transport/API error) — cannot evaluate the changelog fragment. This is NOT a missing-fragment failure; re-run the job." >&2
-            exit 1
-          fi
-          added=$(printf '%s\n' "$diff_out" \
-            | grep -E '^\+\+\+ b/changelog_unreleased/(added|changed|deprecated|removed|fixed|security)/[0-9]+\.md$' \
-            | sed -E 's|^\+\+\+ b/||' \
-            || true)
+          # One call supplies both the allow-set (PR number ∪
+          # closingIssuesReferences — the fragment stem may be either, see
+          # changelog_unreleased/TEMPLATE.md) and the expected file count.
+          pr_json=$(fetch_with_retry "the PR metadata" \
+            gh pr view "$PR_NUM" --repo "$REPO" \
+            --json number,closingIssuesReferences,changedFiles)
 
-          if [ -z "$added" ]; then
-            echo "::error::No changelog fragment added in this PR. Expected a file under changelog_unreleased/<category>/<N>.md per changelog_unreleased/TEMPLATE.md. Apply the 'skip-changelog' label if this PR has no end-user observable change." >&2
-            exit 1
-          fi
+          # The NET file listing: merge-base..head, one entry per file with
+          # its final status — not the per-commit patch union, which reports a
+          # file touched and then reverted, and reports a path that is no
+          # longer in the checkout. `--slurp` is rejected together with `--jq`
+          # by gh, so the shaping happens in a separate jq below.
+          files_json=$(fetch_with_retry "the PR file listing" \
+            gh api --paginate --slurp "repos/${REPO}/pulls/${PR_NUM}/files?per_page=100")
 
-          # Per-fragment validation: positive integer stem + (#<stem>) match
-          # in the bullet + stem in the allow-set.
-          # ALL added fragments must pass — a single valid fragment must NOT
-          # mask a malformed sibling (all-valid contract). Accumulate failures in
-          # `bad` so every offending fragment gets a `::error file=` annotation
-          # in one run, then fail after the loop.
-          bad=0
-          while IFS= read -r path; do
-            [ -z "$path" ] && continue
-            stem=$(basename "$path" .md)
+          allowed=$(printf '%s' "$pr_json" \
+            | jq -r '[.number, (.closingIssuesReferences[]?.number)] | unique | map(tostring) | join(" ")')
+          expected=$(printf '%s' "$pr_json" | jq -r '.changedFiles')
 
-            case "$stem" in
-              0|0*)
-                echo "::error file=$path::Filename stem must be a positive integer (got '$stem')." >&2
-                bad=1
-                continue
-                ;;
-            esac
-
-            if ! grep -qE '^- ' "$path"; then
-              echo "::error file=$path::Fragment must be a single-line markdown bullet beginning with '- '. See changelog_unreleased/TEMPLATE.md." >&2
-              bad=1
-              continue
-            fi
-
-            # Bullet + (#<stem>) ref must co-occur on ONE line: the two
-            # checks were line-independent, so a malformed multi-line fragment
-            # (a `- ` bullet on one line, the `(#N)` ref on another) passed both.
-            # Requiring `^- .*(#<stem>)` on a single line closes that gap.
-            if ! grep -qE "^- .*\(#${stem}\)" "$path"; then
-              echo "::error file=$path::Fragment bullet line must contain (#${stem}) matching the filename stem on the SAME line (single-line '- ... (#${stem})'). See changelog_unreleased/TEMPLATE.md." >&2
-              bad=1
-              continue
-            fi
-
-            if ! printf '%s\n' $allowed | grep -qx "$stem"; then
-              echo "::error file=$path::Filename stem '$stem' is neither this PR's number (${PR_NUM}) nor in closingIssuesReferences. Rename the file to match, or update the PR's Closes/Refs to include #${stem}." >&2
-              bad=1
-              continue
-            fi
-
-            echo "check-changelog: $path validates (stem=$stem, bullet form, in allow-set)"
-            # Here-string (not a `<<EOF` heredoc): a heredoc terminator must sit
-            # at column 0, which dedents out of this `run: |` YAML block scalar
-            # and startup-fails the whole workflow. `<<<` keeps every line
-            # inside the block.
-          done <<< "$added"
-
-          if [ "$bad" = 1 ]; then
-            echo "::error::One or more added fragments failed validation. Every added fragment must satisfy all rules (positive-integer stem, leading '- ' bullet, (#<N>) ref matching the stem, stem in the PR/issue allow-set) — one valid fragment does not excuse a malformed sibling. See changelog_unreleased/TEMPLATE.md." >&2
-            exit 1
-          fi
-          echo "check-changelog: all added fragments valid — passing."
-          exit 0
+          printf '%s' "$files_json" | bash .github/workflows/check-changelog.sh \
+            --pr "$PR_NUM" \
+            --expected-count "$expected" \
+            --allowed "$allowed" \
+            --root .
