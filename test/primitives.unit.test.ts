@@ -11,7 +11,11 @@
  *                   sink is the path the consuming gate reads and nothing
  *                   else (§4.6), readable only by the account that writes
  *                   it (§5.5), and its degradation signal names a recovery
- *                   that is live where it is emitted (§3.11).
+ *                   that is live where it is emitted — one per object to
+ *                   repair, never one clause shared across objects that
+ *                   owe different acts (§3.11). The write itself never
+ *                   returns having landed only part of a record, measured
+ *                   at the seam the append calls (§3.12).
  *   - state-root.ts — resolution matrix: no seam → operational path
  *                   computed, nothing created; seam → override with
  *                   `seamActive: true`; malformed/unusable seam → refusal,
@@ -29,12 +33,17 @@
  *                   fail-closed row with an in-place justification.
  */
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
 	chmodSync,
+	closeSync,
+	constants,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	openSync,
 	readFileSync,
+	readSync,
 	rmSync,
 	statSync,
 	symlinkSync,
@@ -47,7 +56,7 @@ import { fileURLToPath } from "node:url";
 // The sink's name comes from the runtime itself: an arm that plants a symlink
 // or reads a mode has to address exactly the path the runtime appends to, so a
 // rename there moves the arm with it instead of quietly aiming it elsewhere.
-import { appendAuditRecord, AUDIT_FILE_NAME, recoveryFor } from "../.pi/extensions/ghjig/audit.ts";
+import { appendAuditRecord, AUDIT_FILE_NAME, recoveryFor, writeRecordLine } from "../.pi/extensions/ghjig/audit.ts";
 import { locateRepoRoot, locateRepoRootFrom } from "../.pi/extensions/ghjig/locate.ts";
 import { POSTURES } from "../.pi/extensions/ghjig/postures.ts";
 import { resolveStateRoot } from "../.pi/extensions/ghjig/state-root.ts";
@@ -454,6 +463,111 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 				general,
 				`${code} falls to the general recovery, which prescribes making ${sinkPath} a plain file writable by this account — for this failure it already is one, so the clause names an act that changes nothing: ${general}`,
 			);
+		}
+	});
+
+	it("gives each delayed-write object its own recovery, not one shared clause (§3.11)", () => {
+		// Distinctness from the general arm is not enough: four codes can all
+		// miss the general clause and still share ONE clause between them, and
+		// then a read-only mount and a failed device are both told to free disk
+		// space. The comparison is GROUP-wise, one object per group — pairwise
+		// across the four codes would red on ENOSPC and EDQUOT, which name the
+		// same object (room for the record) and are right to share a clause.
+		// Clauses are compared to each other, never to expected text, so the
+		// arm pins the routing and not the wording.
+		const stateRoot = join(tmpdir(), "ghjig-audit-delayed-write");
+		const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
+		const groups = [
+			{ object: "room for the record on the filesystem", codes: ["ENOSPC", "EDQUOT"] },
+			{ object: "the mount, which refuses every write while it holds", codes: ["EROFS"] },
+			{ object: "the device or transport under the filesystem", codes: ["EIO"] },
+		];
+		for (const [index, group] of groups.entries()) {
+			for (const other of groups.slice(index + 1)) {
+				for (const code of group.codes) {
+					for (const otherCode of other.codes) {
+						assert.notEqual(
+							recoveryFor({ code }, stateRoot, sinkPath),
+							recoveryFor({ code: otherCode }, stateRoot, sinkPath),
+							`${code} and ${otherCode} select the same recovery, but the object to repair differs — ${group.object} versus ${other.object} — so one of the two is being told to act on something that did not fail: ${recoveryFor({ code }, stateRoot, sinkPath)}`,
+						);
+					}
+				}
+			}
+		}
+	});
+});
+
+describe("audit primitive: the record write is all-or-raise (§3.12)", () => {
+	/** Bytes sitting at the destination, read off a non-blocking descriptor. */
+	function drainedBytes(fd: number): number {
+		const buffer = Buffer.allocUnsafe(65536);
+		let total = 0;
+		for (;;) {
+			let read: number;
+			try {
+				read = readSync(fd, buffer, 0, buffer.length, null);
+			} catch (error) {
+				// Nothing left to read on a descriptor whose writer is still open.
+				if ((error as { code?: string }).code === "EAGAIN") {
+					return total;
+				}
+				throw error;
+			}
+			if (read === 0) {
+				return total;
+			}
+			total += read;
+		}
+	}
+
+	it("never returns having written only part of the record", {
+		skip: process.platform === "win32" ? "POSIX FIFO" : false,
+	}, () => {
+		// The property is "cannot return without writing everything". Through
+		// appendAuditRecord it is unstageable — that descriptor is always
+		// blocking, and no test host fills a filesystem mid-write (§3.12) — so
+		// it is measured at the seam the append calls, on a NON-BLOCKING
+		// descriptor, where a short write is one call away. One `write(2)` in
+		// place of the fd form returns the short count as a success; the fd
+		// form raises instead, and that raise is the whole difference.
+		//
+		// Nothing here can park: both ends are opened O_NONBLOCK, the reader
+		// end first because a write-only open on a FIFO with no reader fails
+		// ENXIO, and no arm ever waits on the pipe.
+		const dir = mkdtempSync(join(tmpdir(), "ghjig-audit-writeall-"));
+		const fifo = join(dir, "sink.fifo");
+		execFileSync("mkfifo", [fifo]);
+		const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
+		const writer = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+		try {
+			// Larger than any pipe buffer a host is configured with, so the write
+			// cannot legitimately complete in one call.
+			const line = `${"x".repeat(1024 * 1024)}\n`;
+			const size = Buffer.byteLength(line);
+			let returned = false;
+			try {
+				writeRecordLine(writer, line);
+				returned = true;
+			} catch {
+				// The raise is the reported failure; what landed is measured below.
+			}
+			const landed = drainedBytes(reader);
+			assert.ok(
+				!returned || landed === size,
+				`the write returned normally with ${landed} of ${size} bytes at the destination: the caller is told the record was written when only a prefix of it was, and the append folds that partial line into a trail it reports as clean`,
+			);
+			// The residual the module enumerates: a failed write is not a
+			// no-op — a prefix is at rest at the destination — so what the
+			// raise removes is the false success, never the torn record.
+			assert.ok(
+				returned || (landed > 0 && landed < size),
+				`the raise left ${landed} of ${size} bytes at the destination, so the torn-record residual the module enumerates does not describe what happens here`,
+			);
+		} finally {
+			closeSync(writer);
+			closeSync(reader);
+			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 });

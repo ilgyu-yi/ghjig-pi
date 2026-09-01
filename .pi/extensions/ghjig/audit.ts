@@ -30,24 +30,40 @@
  * operational writer, not to observability (§3.8 — additive
  * observability never moves a fail direction).
  *
- * The record is written with the fd form of `writeFileSync`, never with
- * `writeSync`. `writeSync` is one `write(2)`: it returns a byte COUNT,
- * and a count smaller than the payload leaves a record with no trailing
- * newline for the next append to concatenate onto — the one malformed
- * line the format above says can never occur — while the append returns
- * `true` and a durable registration entry folds a clean `auditWritable`.
+ * The record is written through `writeRecordLine` — the fd form of
+ * `writeFileSync`, never `writeSync`. `writeSync` is one `write(2)`: it
+ * returns a byte COUNT, and a count smaller than the payload leaves the
+ * caller holding a partial record it believes is the whole one, so the
+ * append returns `true` and a durable registration entry folds a clean
+ * `auditWritable`. What the fd form removes is that FALSE SUCCESS: it
+ * loops until the buffer drains and raises the underlying error when it
+ * cannot, so a record that did not land whole is reported as a failure.
  * That is the same false success the close handling below exists to
- * remove, on the write side. The fd form loops until the buffer drains
- * and raises the underlying error when it cannot, so the append either
- * writes the whole record or takes the degradation path.
+ * remove, on the write side.
  *
- * That short write is not stageable through this surface, and the code
- * carries the property by construction rather than by an arm (§3.12):
- * the sink descriptor is always blocking, where a pipe write completes
- * rather than shortens, and a regular-file write shortens only on a
- * mid-write `ENOSPC` or a signal. The module's own text cites a network
- * filesystem as why the close is handled at all; this is the write side
- * of that premise.
+ * It does NOT make the append transactional: "the record was written"
+ * and "the append degraded" are not exclusive at the file level, and the
+ * reported failure is about the caller's belief, not about the bytes at
+ * the destination. A failure part-way through the loop
+ * leaves an unterminated prefix at the sink AND takes the degradation
+ * path; the next append concatenates onto that prefix, so the sink
+ * carries one malformed line. That torn record is the one way the
+ * one-record-per-line format above can break — free text never breaks
+ * it — and it is the residual this primitive does not model (§3.11).
+ * Through `appendAuditRecord` the descriptor is always blocking, so the
+ * reachable instance is a mid-write `ENOSPC` on a regular file, and no
+ * act on the writer side repairs a line already at rest: the consumer of
+ * the trail is the side that must refuse a final line carrying no
+ * newline rather than parse it (§3.10, torn write — a reader-side rule).
+ *
+ * The write-all property is pinned at the SEAM rather than through this
+ * function (§3.12). A short write is not stageable through
+ * `appendAuditRecord` — that would need a filesystem filled mid-write on
+ * a test host — but "cannot return without writing everything, or raise"
+ * is a property of `writeRecordLine` alone, and a non-blocking
+ * descriptor stages it in one call. That is why the write is a named
+ * export rather than an inline call, the same device the recovery arms
+ * use to reach `recoveryFor` directly.
  *
  * "Never throw" reaches the close. `closeSync` reports delayed-write
  * failures (`EIO`, `ENOSPC`, a network filesystem), and a throw out of a
@@ -71,6 +87,21 @@ const SINK_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT |
 
 /** Owner read/write only — the record at rest (§5.5). */
 const SINK_MODE = 0o600;
+
+/**
+ * Writes `line` to an open descriptor and returns only when every byte of
+ * it has landed; otherwise it raises. The fd form of `writeFileSync` loops
+ * over partial writes, where `writeSync` is one `write(2)` that reports a
+ * short count as a success (see the header).
+ *
+ * Exported so the property can be measured where it is stageable (§3.12):
+ * the sink descriptor `appendAuditRecord` opens is always blocking, so a
+ * short write cannot be provoked through that surface, while on a
+ * non-blocking descriptor it is one call away.
+ */
+export function writeRecordLine(fd: number, line: string): void {
+	writeFileSync(fd, line);
+}
 
 /**
  * The deepest existing ancestor of `sinkPath` that is not a directory —
@@ -148,12 +179,17 @@ function componentKind(path: string): "directory" | "other" | "absent" {
  * act — make the sink a plain writable file — is dead for all of them:
  * it is already one.
  *
- * One shape is UNMODELLED and reaches the general arm carrying its
- * message, stated here rather than left to be inferred (§3.11): an
- * `EACCES` raised by an unsearchable ancestor, where the destination
- * cannot be measured at all. It is not repaired at the sink path the
- * message names; it degrades open with the cause reported, which is
- * where the message already stops short.
+ * The arms above are the modelled objects; every other code reaches the
+ * general arm carrying its message. What decides whether that message is
+ * honest is a RULE, stated here rather than a roster of the shapes it
+ * generates, because the roster is what a later code silently falsifies
+ * (§2.4, §3.11): the general arm's act — make the sink a plain,
+ * owner-writable file — is live exactly when the sink path is the object
+ * that failed. Every unmodelled failure whose object lies elsewhere
+ * carries a dead act, and what it delivers is the cause alone; the append
+ * still degrades open, with no repair named that would have helped. Such
+ * a shape earns an arm when it acquires an act an operator can perform at
+ * a named object, and not before.
  *
  * Exported for the arms that measure the routing directly. A shape whose
  * failure no honest check can stage on a test host — no filesystem is
@@ -237,8 +273,8 @@ export function appendAuditRecord(stateRoot: string, input: AuditInput): boolean
 		const fd = openSync(sinkPath, SINK_FLAGS, SINK_MODE);
 		leaked = fd;
 		// Write-all, not one `write(2)`: a short count discarded here is a
-		// record without its newline reported as a success (see the header).
-		writeFileSync(fd, `${JSON.stringify(record)}\n`);
+		// partial record reported as a success (see the header).
+		writeRecordLine(fd, `${JSON.stringify(record)}\n`);
 		leaked = undefined;
 		closeSync(fd);
 		return true;
