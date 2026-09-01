@@ -47,7 +47,19 @@ on:
     branches:
       - main
       - '*-maintenance'
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+
+# One head can carry several `fragment-gate` runs, and the required-check
+# rollup returns all of them undeduplicated — so a run queued while the pull
+# request was still a draft can complete AFTER a ready-era run at the same
+# head. Which of the two the platform honours is not measured here. A cancelled
+# run is never a success, so cancelling the earlier run of the group is correct
+# under every candidate rule rather than under a guess about one. The group is
+# keyed on the pull request number: runs of one pull request contend, runs of
+# different pull requests do not.
+concurrency:
+  group: check-changelog-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -80,8 +92,17 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUM: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          EVENT_ACTION: ${{ github.event.action }}
         run: |
           set -euo pipefail
+
+          # The runs API exposes the webhook NAME and never the activity type,
+          # so `ready_for_review` and `synchronize` are indistinguishable from
+          # outside the run. Echo it so the run log carries what fired this
+          # evaluation. Routed through `env:` like every other event value in
+          # this file, even though the platform controls the enum.
+          echo "check-changelog: pull_request activity type = ${EVENT_ACTION}"
 
           if [ ! -f .github/workflows/check-changelog.sh ]; then
             echo "::error::.github/workflows/check-changelog.sh is missing — restore it from this repository's history (the substrate onboarding commit ships it)." >&2
@@ -151,7 +172,29 @@ jobs:
           # changelog_unreleased/TEMPLATE.md) and the expected file count.
           pr_json=$(fetch_with_retry "the PR metadata" nonempty_object \
             gh pr view "$PR_NUM" --repo "$REPO" \
-            --json number,closingIssuesReferences,changedFiles)
+            --json number,closingIssuesReferences,changedFiles,isDraft)
+
+          # The live draft read rides the fetch above rather than a second
+          # call. An absent or malformed field yields the string `null` here,
+          # which is not `true`, so a degraded read runs the gate.
+          live_draft=$(printf '%s' "$pr_json" | jq -r '.isDraft')
+
+          # The sleep is CONJUNCTIVE and compared by exact string equality: the
+          # payload's `draft` AND the live `isDraft` must both read `true`. The
+          # payload therefore only ever VETOES the sleep, never grants it, so
+          # an eventually-consistent live `true` on `ready_for_review` cannot
+          # silence the gate on the very event meant to wake it.
+          if [ "$PR_DRAFT" = "true" ] && [ "$live_draft" = "true" ]; then
+            echo "::warning::fragment-gate slept: this pull request is a draft (payload draft=true and live isDraft=true), so the changelog fragment floor was not evaluated. Run 'gh pr ready ${PR_NUM}' to mark it ready and wake the gate."
+            {
+              echo "### fragment-gate slept — draft pull request"
+              echo
+              echo "The webhook payload's \`draft\` and the live \`isDraft\` both read \`true\`, so the changelog fragment floor was **not evaluated** on this run."
+              echo
+              echo "Recovery: \`gh pr ready ${PR_NUM}\` marks the pull request ready for review, which wakes the gate."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
 
           # The NET file listing: merge-base..head, one entry per file with
           # its final status — not the per-commit patch union, which reports a
