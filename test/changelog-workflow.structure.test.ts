@@ -348,11 +348,27 @@ describe("W3 — the draft-sleep condition in the gate step", () => {
  * of both lines is still a correctly-guarded sleep, and silently a pass.
  */
 describe("W6 — the sleep's disclosure", () => {
+	/**
+	 * The branch body alone — from the guarding `if` to its own `fi`, never to
+	 * the end of the step. Without the end bound these assertions would be
+	 * satisfied by a disclosure sitting anywhere in the ENFORCING path below
+	 * the branch, so moving both lines past the `fi` would leave a silent sleep
+	 * and a green suite: the exact shape this block's header says it catches.
+	 * A `/g` regex carries `lastIndex` between calls, so the source is re-wrapped
+	 * rather than `.test()`-ed directly.
+	 */
 	const sleepBranch = (): string => {
 		const lines = shellLines(validateStep());
-		const start = lines.findIndex((line) => EQUALS_TRUE.test(line));
-		EQUALS_TRUE.lastIndex = 0;
-		return start === -1 ? "" : lines.slice(start).join("\n");
+		const guard = new RegExp(EQUALS_TRUE.source);
+		const start = lines.findIndex((line) => guard.test(line));
+		if (start === -1) {
+			return "";
+		}
+		const opensAt = indentOf(lines[start]);
+		const end = lines.findIndex(
+			(line, i) => i > start && /^\s*fi\s*$/.test(line) && indentOf(line) === opensAt,
+		);
+		return lines.slice(start, end === -1 ? lines.length : end).join("\n");
 	};
 
 	it("warns on the surface a merge decision reads", () => {
