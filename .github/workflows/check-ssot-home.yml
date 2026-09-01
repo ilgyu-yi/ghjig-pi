@@ -10,9 +10,6 @@ name: check-ssot-home
 # Pure bash. No third-party Actions; actions/checkout
 # is the GitHub-shipped git-clone equivalent. Runs
 # the shipped check-ssot-home.sh with the repo root as the default root.
-#
-# Does NOT self-trigger on its own landing PR — GitHub's pull_request security
-# policy excludes workflow files modified inside a PR from running on that PR.
 
 on:
   pull_request:
