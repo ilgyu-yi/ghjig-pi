@@ -28,9 +28,9 @@
  *      an inline `#` inside a quoted scalar. The cost is accepted in exchange
  *      for asserting nothing about indentation beyond block boundaries.
  *   2. That a workflow whose own trigger set has changed self-applies on the
- *      pull request carrying that change. Actions resolves the trigger set for
- *      a `pull_request` event from the BASE ref, so the new triggers take
- *      effect only once merged. Nothing in this tree can observe that.
+ *      pull request carrying that change. Nothing in this tree can observe
+ *      that; it is a platform property, and the only way to settle it is to
+ *      push the change and read which activity type the resulting runs carry.
  *   3. What the branch-protection required-check rollup honours when several
  *      runs of one check name exist at a single head. The concurrency group
  *      asserted below is the mechanism intended to keep that set to one; that
