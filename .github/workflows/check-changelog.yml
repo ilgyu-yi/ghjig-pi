@@ -6,6 +6,38 @@ name: check-changelog
 # changelog_unreleased/TEMPLATE.md, unless the PR carries the
 # `skip-changelog` label.
 #
+# Sleeps clean while the pull request is a draft: the floor this gate enforces
+# binds from the ready transition onward (SPEC §1.3, §2.3), so until then its
+# subject does not exist (SPEC §5.3). The sleep is a deliberate branch, and
+# `ready_for_review` is in the trigger set below so the gate wakes at the
+# transition it defers to. The draft state is read CONJUNCTIVELY — the
+# `pull_request` payload's `draft` AND the live `isDraft` from the `gh pr view`
+# this job already makes — because a live read taken on `ready_for_review` can
+# be eventually-consistent and return a stale `true`, which would sleep the
+# gate on the very event meant to wake it. Either source reading false runs the
+# gate, so a disagreement can only refuse the sleep, never grant it: ambiguity
+# falls toward the block (SPEC §3.9). `converted_to_draft` is deliberately NOT
+# in the trigger set — firing on it would turn a red at a head into a green
+# without that head changing.
+#
+# Residual — what the sleep deliberately leaves unreached (SPEC §3.11), so each
+# gap reads as a decision rather than an oversight:
+#
+#   1. Clause 2, check-changelog.sh's universal no-junk check over the
+#      newly-landing fragments, sleeps with clause 1: the draft branch sits
+#      above the call into the script, which owns both.
+#   2. That script's three fail-closed arms — empty payload, truncation, an
+#      unrecognized status — sleep with it, for the same reason.
+#   3. `edited`, the event a base retarget produces, is not in the trigger set,
+#      so a retarget alone does not re-evaluate the gate.
+#   4. Either source of the draft read returning false runs the gate. The
+#      conjunction is one-sided by design, so a draft whose payload or live
+#      read says false is gated as though it were ready.
+#   5. A pull request re-drafted after a red keeps that verdict until its next
+#      push; the sleep is not retroactive.
+#   6. A `labeled` or `unlabeled` event on a re-drafted pull request can report
+#      green on an unchanged head. Enumerated here and left to its own change.
+#
 # Pure bash + gh. No third-party Actions;
 # actions/checkout is the canonical GitHub-shipped equivalent of `git
 # clone`.
