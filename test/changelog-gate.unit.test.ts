@@ -27,14 +27,17 @@
  *     reason to block.
  *   Clause 2 (universal, no-junk). Every `added`/`renamed`/`copied` entry
  *     matching the fragment shape is valid. One valid fragment never excuses
- *     a malformed sibling. Exempt: a re-categorising move — an `added` stem
- *     that also appears among the listing's `removed` stems, or a `renamed`
- *     entry whose stem is unchanged — which was validated when it was first
- *     added.
+ *     a malformed sibling. A re-categorising move — an `added` stem that also
+ *     appears among the listing's `removed` fragment stems, or a `renamed`
+ *     entry from one fragment path to another leaving the stem unchanged — is
+ *     exempt from the allow-set rule ALONE, because that stem was in the
+ *     allow-set of the PR that first added the fragment. Every other rule
+ *     keeps running on it.
  *
- * Two fail-closed arms run before either clause and must stay distinguishable
- * from clause 1, so a transport-shaped failure is never reported as "the
- * author forgot a fragment": a flattened length that disagrees with
+ * Three fail-closed arms run before either clause and must stay
+ * distinguishable from clause 1, so a transport-shaped failure is never
+ * reported as "the author forgot a fragment": a payload the gate read no
+ * entries from at all, a flattened length that disagrees with
  * `--expected-count` (truncation), and a `status` outside the known set.
  *
  * Fragment validity is the pre-existing contract of
@@ -76,6 +79,23 @@ const FRAGMENT_PATH = /^changelog_unreleased\/(added|changed|deprecated|removed|
 const T7_NON_FRAGMENT = "README.md";
 
 /**
+ * T21's previous path. Named for the same reason as T7's: the case's whole
+ * discriminating power is that this path lies outside `FRAGMENT_PATH`, so an
+ * exemption test comparing basename stems alone would exempt the rename.
+ */
+const T21_NON_FRAGMENT_PREVIOUS = "docs/notes/31.md";
+
+/** The workflow command T22's hostile filename tries to put on the annotation surface. */
+const T22_FORGED_COMMAND = "::error::forged annotation";
+
+/**
+ * T22's filename, carrying a real line feed. The listing is attacker-supplied
+ * — a contributor names the files in their own PR — so a value that reaches
+ * an annotation must not be able to open a second workflow command.
+ */
+const T22_HOSTILE_FILENAME = `changelog_unreleased/fixed/99.md\n${T22_FORGED_COMMAND}`;
+
+/**
  * Clause-1's distinguishing token, matched case-insensitively: the contract
  * fixes the words, not the sentence-initial capital. Case-insensitivity also
  * makes every "and NOT clause 1" assertion strictly stronger.
@@ -92,7 +112,12 @@ const REMEDIATION = /skip-changelog|re-run|Rename the file|Closes|TEMPLATE\.md/;
 
 interface FileEntry {
 	filename: string;
-	status: string;
+	/**
+	 * Optional, because a partial entry — one the platform sent with no
+	 * `status` key — is a shape the gate has to classify rather than
+	 * misread. T24 is the only case that omits it.
+	 */
+	status?: string;
 	previous_filename?: string;
 }
 
@@ -104,6 +129,12 @@ interface CaseSpec {
 	files: Record<string, string>;
 	/** stdin payload: an array of pages, each page an array of file objects. */
 	pages: FileEntry[][];
+	/**
+	 * stdin verbatim, used instead of the serialization of `pages`. The two
+	 * arms that run before the payload is parsed are reached only by input
+	 * that is not a listing at all, which `pages` cannot express.
+	 */
+	rawStdin?: string;
 	expectedCount: number;
 	/** Whitespace-separated allow-set in one argument: PR number ∪ closing issues. */
 	allowed: string;
@@ -277,10 +308,8 @@ const CASES: CaseSpec[] = [
 	// T13 and T15 are a pair, and are a pair for one reason. A re-categorising
 	// move can reach the file listing in either of two shapes — an `added`
 	// entry whose stem also appears among the listing's `removed` entries, or a
-	// single `renamed` entry whose stem is unchanged — and this repository
-	// holds no rename precedent that settles which shape the platform reports
-	// (`git log --all --diff-filter=R --name-status` is empty; the `renamed`
-	// entry count over the merged PRs' file listings is zero). The exemption is
+	// single `renamed` entry whose stem is unchanged — and which of the two
+	// arrives is the platform's choice, not the gate's. The exemption is
 	// therefore pinned on both paths, neither standing in for the other: a
 	// clause left without an executable form is stranded, and the stranded half
 	// is as likely to be the one production takes as the pinned half.
@@ -343,6 +372,174 @@ const CASES: CaseSpec[] = [
 		pr: 43,
 		expectBlock: false,
 	},
+	{
+		id: "T16",
+		// Stem 44 is in the allow-set and the path is deliberately absent from
+		// `files`, so presence is its only defect: this is the fixture that
+		// enters the missing-file arm. T8 cannot — a `removed` entry is
+		// filtered by status at both clause loops before any read.
+		summary: "an added fragment listed but absent from the checkout is refused for its absence",
+		files: { "changelog_unreleased/fixed/43.md": validBullet(43) },
+		pages: [
+			[
+				{ filename: "changelog_unreleased/fixed/43.md", status: "added" },
+				{ filename: "changelog_unreleased/fixed/44.md", status: "added" },
+			],
+		],
+		expectedCount: 2,
+		allowed: "43 44",
+		pr: 43,
+		expectBlock: true,
+	},
+	{
+		id: "T17",
+		// Valid JSON of the wrong shape: `.[][]` cannot iterate a string, so
+		// the extraction fails while the payload is neither empty nor blank.
+		summary: "stdin that is not the paginated shape is refused as unclassifiable, not as missing",
+		files: {},
+		pages: [],
+		rawStdin: '{"not":"the paginated shape"}',
+		expectedCount: 1,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+	},
+	{
+		id: "T18",
+		// The path shape admits `[0-9]+`, so a leading zero reaches the gate as
+		// a well-formed fragment path. Stem `043` is outside the allow-set as
+		// every leading-zero stem is — the allow-set is built from PR and issue
+		// numbers — so the case asserts WHICH rule refuses it, not merely that
+		// something does.
+		summary: "an added fragment whose stem carries a leading zero is refused for its stem shape",
+		files: {
+			"changelog_unreleased/fixed/43.md": validBullet(43),
+			"changelog_unreleased/fixed/043.md": "- A user-observable change worth one line. (#043)\n",
+		},
+		pages: [
+			[
+				{ filename: "changelog_unreleased/fixed/43.md", status: "added" },
+				{ filename: "changelog_unreleased/fixed/043.md", status: "added" },
+			],
+		],
+		expectedCount: 2,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+	},
+	{
+		id: "T19",
+		// T8's shape with the path PRESENT at --root. That difference is the
+		// whole case: with the file absent, "a removed entry is not a witness"
+		// and "the file could not be read" produce the same refusal, so only
+		// this fixture measures clause 1's status set.
+		summary: "a removed entry is no witness even when its path is present at --root",
+		files: { "changelog_unreleased/fixed/43.md": validBullet(43) },
+		pages: [[{ filename: "changelog_unreleased/fixed/43.md", status: "removed" }]],
+		expectedCount: 1,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+	},
+	{
+		id: "T20",
+		// The exemption's ceiling. Stem 31 is exempt from the allow-set rule by
+		// the `removed` half of the same move, and its content is garbage: an
+		// exemption that waived every rule would carry an arbitrary rewrite of
+		// an already-merged fragment past clause 2 under cover of a move.
+		summary: "a fragment exempted by a paired removal is still content-validated",
+		files: {
+			"changelog_unreleased/fixed/43.md": validBullet(43),
+			"changelog_unreleased/fixed/31.md": "Not a bullet at all (#31)\n",
+		},
+		pages: [
+			[
+				{ filename: "changelog_unreleased/fixed/43.md", status: "added" },
+				{ filename: "changelog_unreleased/fixed/31.md", status: "added" },
+				{ filename: "changelog_unreleased/added/31.md", status: "removed" },
+			],
+		],
+		expectedCount: 3,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+	},
+	{
+		id: "T21",
+		// The exemption's entry condition. A rename into changelog_unreleased/
+		// from outside it was never validated by this gate, so it is an
+		// addition and carries an addition's burden. The content is valid and
+		// stem 31 is outside the allow-set, so the allow-set rule is the sole
+		// defect and the exemption is the only thing that could waive it.
+		summary: "a rename whose previous path is not a fragment is not exempt from the allow-set rule",
+		files: {
+			"changelog_unreleased/fixed/43.md": validBullet(43),
+			"changelog_unreleased/fixed/31.md": validBullet(31),
+		},
+		pages: [
+			[
+				{ filename: "changelog_unreleased/fixed/43.md", status: "added" },
+				{
+					filename: "changelog_unreleased/fixed/31.md",
+					status: "renamed",
+					previous_filename: T21_NON_FRAGMENT_PREVIOUS,
+				},
+			],
+		],
+		expectedCount: 2,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+	},
+	{
+		id: "T22",
+		// A filename carrying a real line feed. Escaped, it is not of fragment
+		// shape, so it is an ordinary non-fragment entry and the run turns on
+		// the valid 43 fragment alone — which is the point: the line feed
+		// reaches neither an annotation nor a second listing row.
+		summary: "a filename carrying a line feed puts no second workflow command on the annotation surface",
+		files: { "changelog_unreleased/fixed/43.md": validBullet(43) },
+		pages: [
+			[
+				{ filename: "changelog_unreleased/fixed/43.md", status: "added" },
+				{ filename: T22_HOSTILE_FILENAME, status: "added" },
+			],
+		],
+		expectedCount: 2,
+		allowed: "43",
+		pr: 43,
+		expectBlock: false,
+	},
+	{
+		id: "T23",
+		// Blank but not empty. jq reads a whitespace-only document as no
+		// document at all and exits 0, so the listing and the length both come
+		// back blank; an arm testing emptiness literally would pass this
+		// through and let the truncation arm assert a partial view of a
+		// listing the gate never read.
+		summary: "a whitespace-only payload is refused as an unread listing, not as a truncated one",
+		files: {},
+		pages: [],
+		rawStdin: "   \n",
+		expectedCount: 1,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+	},
+	{
+		id: "T24",
+		// An entry the platform sent with no `status` key: the TSV row's
+		// leading field is empty. Tab is IFS whitespace, so a positional read
+		// elides that field and shifts every later one left — which names the
+		// filename as the bad status and the status as an empty filename.
+		summary: "an entry with no status names the empty status and the filename it belongs to",
+		files: {},
+		pages: [[{ filename: "changelog_unreleased/fixed/43.md" }]],
+		expectedCount: 1,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+	},
 ];
 
 const roots = new Map<string, string>();
@@ -375,7 +572,7 @@ function runGate(spec: CaseSpec, root: string): GateResult {
 		"--root",
 		root,
 	];
-	const options = { input: JSON.stringify(spec.pages), encoding: "utf8" as const };
+	const options = { input: spec.rawStdin ?? JSON.stringify(spec.pages), encoding: "utf8" as const };
 	try {
 		const stdout = execFileSync("bash", args, options);
 		return { status: 0, stdout, stderr: "" };
@@ -404,6 +601,15 @@ function markerLine(result: GateResult): string {
 	const line = result.stdout.split("\n").find((candidate) => candidate.includes(MARKER));
 	assert.ok(line !== undefined, `expected a stdout line containing "${MARKER}"`);
 	return line;
+}
+
+/**
+ * The stderr lines the platform reads as workflow commands. A command is
+ * recognized at the start of a line, so the count of these lines is the size
+ * of the annotation surface a run produced.
+ */
+function workflowCommandLines(result: GateResult): string[] {
+	return result.stderr.split("\n").filter((line) => line.startsWith("::error"));
 }
 
 before(() => {
@@ -500,6 +706,10 @@ describe("T7 — a file status outside the known set", () => {
 	});
 });
 
+// T8's payload never enters the presence check: `removed` is filtered by
+// status at both clause loops, so its last assertion below is a statement
+// about clause 1's refusal text and not about the missing-file arm. T16 is
+// the case that drives that arm.
 describe("T8 — a removed fragment is the only fragment-path entry", () => {
 	it("blocks", () => {
 		assert.equal(resultOf("T8").status, 1);
@@ -577,5 +787,128 @@ describe("T14 — a modified out-of-allow-set fragment and nothing else (clause 
 describe("T15 — a rename that leaves the stem unchanged (clause 2 exemption)", () => {
 	it("passes: a renamed fragment whose stem is unchanged was validated when first added", () => {
 		assert.equal(resultOf("T15").status, 0);
+	});
+});
+
+describe("T16 — an added fragment listed but absent from the checkout", () => {
+	it("blocks", () => {
+		assert.equal(resultOf("T16").status, 1);
+	});
+
+	it("names absence from the checkout as the defect", () => {
+		assert.match(resultOf("T16").stderr, /not present in the checkout/);
+	});
+
+	it("does not let grep's own failure out in place of the reason", () => {
+		assert.doesNotMatch(resultOf("T16").stderr, /No such file/i);
+	});
+});
+
+describe("T17 — stdin that is valid JSON of the wrong shape", () => {
+	it("blocks", () => {
+		assert.equal(resultOf("T17").status, 1);
+	});
+
+	it("names the extraction, not the counting, as what failed", () => {
+		assert.match(resultOf("T17").stderr, /could not be classified/);
+	});
+
+	it("is distinguishable from the clause-1 refusal", () => {
+		assert.doesNotMatch(resultOf("T17").stderr, NO_FRAGMENT);
+	});
+});
+
+describe("T18 — an added fragment whose stem carries a leading zero", () => {
+	it("blocks", () => {
+		assert.equal(resultOf("T18").status, 1);
+	});
+
+	it("refuses it for the stem shape, not for the allow-set", () => {
+		assert.match(resultOf("T18").stderr, /no leading zero/);
+	});
+
+	it("names the offending stem on stderr", () => {
+		assert.match(resultOf("T18").stderr, /043/);
+	});
+});
+
+describe("T19 — a removed fragment whose path is present at --root (clause 1)", () => {
+	it("blocks: a removed entry is not a witness, however the checkout looks", () => {
+		assert.equal(resultOf("T19").status, 1);
+	});
+
+	it("refuses in clause-1 terms", () => {
+		assert.match(resultOf("T19").stderr, NO_FRAGMENT);
+	});
+});
+
+describe("T20 — a fragment exempted by a paired removal, with garbage content (clause 2)", () => {
+	it("blocks: the exemption waives the allow-set rule and nothing else", () => {
+		assert.equal(resultOf("T20").status, 1);
+	});
+
+	it("names the bullet form as the defect", () => {
+		assert.match(resultOf("T20").stderr, /single-line markdown bullet/);
+	});
+
+	it("does not refuse the exempt stem for the allow-set: the waiver still holds", () => {
+		assert.doesNotMatch(resultOf("T20").stderr, /neither this PR's number/);
+	});
+});
+
+describe("T21 — a rename whose previous path was never a fragment (clause 2)", () => {
+	it("renames from outside the fragment tree: the case measures the exemption's entry condition", () => {
+		assert.doesNotMatch(T21_NON_FRAGMENT_PREVIOUS, FRAGMENT_PATH);
+	});
+
+	it("blocks", () => {
+		assert.equal(resultOf("T21").status, 1);
+	});
+
+	it("names the allow-set rule for the renamed-to stem", () => {
+		assert.match(resultOf("T21").stderr, /stem '31' is neither this PR's number/);
+	});
+});
+
+describe("T22 — a filename carrying a line feed", () => {
+	it("carries a real line feed: the case measures escaping, not path shape", () => {
+		assert.match(T22_HOSTILE_FILENAME, /\n/);
+	});
+
+	it("opens no workflow command at all on this run", () => {
+		assert.equal(workflowCommandLines(resultOf("T22")).length, 0);
+	});
+
+	it("puts no forged command on the annotation surface", () => {
+		assert.ok(
+			!workflowCommandLines(resultOf("T22")).some((line) => line.startsWith(T22_FORGED_COMMAND)),
+		);
+	});
+});
+
+describe("T23 — a whitespace-only payload on stdin", () => {
+	it("blocks", () => {
+		assert.equal(resultOf("T23").status, 1);
+	});
+
+	it("names the transport, not the author", () => {
+		assert.match(resultOf("T23").stderr, /transport failure/);
+	});
+
+	it("is distinguishable from the truncation refusal", () => {
+		assert.doesNotMatch(resultOf("T23").stderr, /incomplete/i);
+	});
+});
+
+describe("T24 — an entry the platform sent with no status", () => {
+	it("blocks", () => {
+		assert.equal(resultOf("T24").status, 1);
+	});
+
+	it("names the empty status and the filename it belongs to, in that order", () => {
+		assert.match(
+			resultOf("T24").stderr,
+			/Unrecognized file status '' for 'changelog_unreleased\/fixed\/43\.md'/,
+		);
 	});
 });
