@@ -81,13 +81,17 @@ jobs:
           }
 
           # The listing is the paginated shape `--slurp` produces: an array of
-          # pages, so emptiness has to be counted across the pages rather than
-          # on the outer array — `[[]]` is an outer array of length 1 and would
-          # otherwise pass. A trailing empty page is legitimate and still does.
-          nonempty_page_array() {
+          # pages. Emptiness is deliberately NOT tested here. `[[]]` is what the
+          # platform returns for a collection with no members, so a pull request
+          # whose net diff is empty produces it legitimately — refusing it at the
+          # fetch spends three retries and then names re-running, which cannot
+          # clear it. The script decides emptiness instead: it cross-checks the
+          # entry count against the PR's own changedFiles, and its floor refusal
+          # names the recovery that is live for an empty listing.
+          single_page_array() {
             [ -n "$1" ] || return 1
             printf '%s' "$1" \
-              | jq -e -s 'length == 1 and (.[0] | type == "array") and ([.[0][]?[]?] | length > 0)' \
+              | jq -e -s 'length == 1 and (.[0] | type == "array")' \
                 >/dev/null 2>&1
           }
 
@@ -122,7 +126,7 @@ jobs:
           # file touched and then reverted, and reports a path that is no
           # longer in the checkout. `--slurp` is rejected together with `--jq`
           # by gh, so the shaping happens in a separate jq below.
-          files_json=$(fetch_with_retry "the PR file listing" nonempty_page_array \
+          files_json=$(fetch_with_retry "the PR file listing" single_page_array \
             gh api --paginate --slurp "repos/${REPO}/pulls/${PR_NUM}/files?per_page=100")
 
           allowed=$(printf '%s' "$pr_json" \
