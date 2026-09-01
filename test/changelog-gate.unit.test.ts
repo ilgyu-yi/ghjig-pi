@@ -540,6 +540,20 @@ const CASES: CaseSpec[] = [
 		pr: 43,
 		expectBlock: true,
 	},
+	{
+		id: "T25",
+		// The bullet and the (#N) reference must co-occur on ONE line. Two
+		// line-independent checks admit this shape: `^- ` matches line 1 and
+		// `(#43)` appears on line 2, so each passes on its own while the
+		// fragment carries no conforming bullet at all.
+		summary: "a bullet and a (#N) reference on separate lines do not satisfy the same-line rule",
+		files: { "changelog_unreleased/fixed/43.md": "- the bullet, with no reference\n(#43)\n" },
+		pages: [[{ filename: "changelog_unreleased/fixed/43.md", status: "added" }]],
+		expectedCount: 1,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+	},
 ];
 
 const roots = new Map<string, string>();
@@ -910,5 +924,15 @@ describe("T24 — an entry the platform sent with no status", () => {
 			resultOf("T24").stderr,
 			/Unrecognized file status '' for 'changelog_unreleased\/fixed\/43\.md'/,
 		);
+	});
+});
+
+describe("T25 — a bullet and its reference on separate lines", () => {
+	it("blocks", () => {
+		assert.equal(resultOf("T25").status, 1);
+	});
+
+	it("names the same-line requirement, not the missing bullet", () => {
+		assert.match(resultOf("T25").stderr, /on the SAME line/);
 	});
 });
