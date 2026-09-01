@@ -47,12 +47,11 @@
  * with this contract. Neither is asserted as such. What is asserted instead is
  * the state invariant whose loss would actually matter — that the label bypass
  * is still wired ahead of the gate (W5) — and the script's untouched-ness is
- * carried by `changelog-gate.unit.test.ts`'s 74 cases staying green and by
- * review, not by this file.
+ * carried by `changelog-gate.unit.test.ts` staying green and by review, not
+ * by this file.
  *
  * This suite reads one file from disk and writes nothing: no network, no `gh`,
- * no `pi`, no fixture. The harness asserts `git status --porcelain` is
- * byte-identical across the suite (`harness/run-pi.ts`).
+ * no `pi`, no fixture.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -313,6 +312,55 @@ describe("W3 — the draft-sleep condition in the gate step", () => {
 			(line) => live.length === 1 && new RegExp(`^\\s*${live[0]}=.*isDraft`).test(line),
 		);
 		assert.ok(assigned, `no isDraft assignment for ${JSON.stringify(live)}`);
+	});
+
+	/**
+	 * The live extraction must not supply a default. `jq -r '.isDraft'` over a
+	 * response missing the field yields the string `null`, which the equality
+	 * above refuses — the gate runs. A `// true` alternative operator would
+	 * silently convert that same degraded read into a sleep, which is the one
+	 * direction §3.9 forbids: an unmeasurable input must never read as asleep.
+	 * The equality assertion above cannot see this, because `// true` leaves
+	 * the comparison shape untouched.
+	 */
+	it("takes the live value with no default, so a degraded read cannot mean draft", () => {
+		const live = draftOperands().filter((operand) => operand !== payloadDraftVar());
+		const assignment = shellLines(validateStep()).find(
+			(line) => live.length === 1 && new RegExp(`^\\s*${live[0]}=.*isDraft`).test(line),
+		);
+		assert.ok(assignment, `no isDraft assignment for ${JSON.stringify(live)}`);
+		assert.doesNotMatch(
+			assignment,
+			/\/\//,
+			"the live isDraft extraction carries a jq alternative operator, which would default a degraded read",
+		);
+	});
+});
+
+/**
+ * W6 — the sleep says so.
+ *
+ * §5.3 requires a sleeping gate to sleep clean AND say so, and §3.9 requires a
+ * gate that is not enforcing to be distinguishable from one that passed. The
+ * sleep concludes the job `success`, so the disclosure is the only thing that
+ * separates the two states for a reader. Neither the trigger assertions nor
+ * the condition assertions above notice its removal: a sleep branch stripped
+ * of both lines is still a correctly-guarded sleep, and silently a pass.
+ */
+describe("W6 — the sleep's disclosure", () => {
+	const sleepBranch = (): string => {
+		const lines = shellLines(validateStep());
+		const start = lines.findIndex((line) => EQUALS_TRUE.test(line));
+		EQUALS_TRUE.lastIndex = 0;
+		return start === -1 ? "" : lines.slice(start).join("\n");
+	};
+
+	it("warns on the surface a merge decision reads", () => {
+		assert.match(sleepBranch(), /::warning::/);
+	});
+
+	it("records the sleep in the job summary", () => {
+		assert.match(sleepBranch(), /GITHUB_STEP_SUMMARY/);
 	});
 });
 
