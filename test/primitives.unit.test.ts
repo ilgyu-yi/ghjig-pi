@@ -50,7 +50,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 // The sink's name comes from the runtime itself: an arm that plants a symlink
@@ -204,6 +204,27 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		return path.endsWith(`/${AUDIT_FILE_NAME}`) ? dirname(path) : path;
 	}
 
+	/**
+	 * Refuses to perform a clause that names a path the fixture does not own.
+	 *
+	 * The arms below carry out the act their clause prescribes — a recursive
+	 * delete, a chmod — on a path chosen by the very function under test, and
+	 * this project mutates that function as routine (§3.12). A mutant that
+	 * makes a clause name something outside the fixture would have the suite
+	 * perform the act THERE, on the host: the delete arm was reproduced doing
+	 * exactly that. Containment is asserted BEFORE the act, never inside
+	 * `perform`, whose catch would fold the refusal into a description string
+	 * and report it as a dead recovery instead of as the out-of-fixture reach
+	 * it is. The fixture root itself is admissible because two arms name it as
+	 * their live object; anything above or beside it is not.
+	 */
+	function assertInsideFixture(named: string, fixture: string): void {
+		assert.ok(
+			named === fixture || named.startsWith(fixture + sep),
+			`the recovery clause names ${named}, which the fixture at ${fixture} does not own. This arm PERFORMS what the clause names, so it refuses to act rather than reach outside the fixture — the selection that produced this path is what the arm exists to measure, and a guard that destroys evidence when it fires is the wrong shape`,
+		);
+	}
+
 	/** Performs `act`, reporting what happened for the arm's failure message. */
 	function perform(description: string, act: () => void): string {
 		try {
@@ -315,6 +336,9 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 			const { warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
 			const clause = recoveryClause(warnings[0] ?? "");
 			const named = clause === undefined ? undefined : pathNamedIn(clause);
+			if (named !== undefined) {
+				assertInsideFixture(named, base);
+			}
 			const performed =
 				named === undefined
 					? "no path named"
@@ -354,6 +378,9 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 			assert.equal(value, false, "the arm measures nothing unless the directory mode refuses the create");
 			const clause = recoveryClause(warnings[0] ?? "");
 			const named = clause === undefined ? undefined : pathNamedIn(clause);
+			if (named !== undefined) {
+				assertInsideFixture(named, stateRoot);
+			}
 			const performed =
 				named === undefined
 					? "no path named"
@@ -427,6 +454,9 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 			assert.equal(value, false, "the arm measures nothing unless the sink's own mode refuses the append");
 			const clause = recoveryClause(warnings[0] ?? "");
 			const named = clause === undefined ? undefined : pathNamedIn(clause);
+			if (named !== undefined) {
+				assertInsideFixture(named, stateRoot);
+			}
 			const performed =
 				named === undefined
 					? "no path named"
@@ -541,8 +571,16 @@ describe("audit primitive: the record write is all-or-raise (§3.12)", () => {
 		const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
 		const writer = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
 		try {
-			// Larger than any pipe buffer a host is configured with, so the write
-			// cannot legitimately complete in one call.
+			// One byte past Linux's default `pipe-max-size`, the largest buffer a
+			// host is ordinarily configured with, so the write cannot complete in
+			// one call and a short write is reachable.
+			//
+			// Reach: on a host whose pipe buffer is 1 MiB or larger the payload
+			// goes in whole, no short write occurs, and the arm measures nothing —
+			// both assertions are implications, so both hold vacuously there and
+			// the `writeSync` mutant survives. The arm passes on such a host
+			// without having measured anything; raising the payload would only
+			// move the same limit to a larger number.
 			const line = `${"x".repeat(1024 * 1024)}\n`;
 			const size = Buffer.byteLength(line);
 			let returned = false;
@@ -631,6 +669,49 @@ describe("state-root resolution matrix (§5.5, §4.6)", () => {
 			assert.throws(() => resolveStateRoot());
 		} finally {
 			rmSync(seamDir, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a seam target this account cannot measure instead of falling back (§3.9)", {
+		// POSIX permission bits, and an account the mode actually binds: for a
+		// superuser the ancestor refuses nothing, the target measures as the
+		// directory it is, and the arm would report a refusal that never
+		// occurred.
+		skip:
+			process.platform === "win32"
+				? "POSIX permission bits"
+				: process.getuid?.() === 0
+					? "the directory mode refuses nothing for this account"
+					: false,
+	}, () => {
+		// The `seam-target` posture row names REFUSED alongside missing and
+		// not-a-directory, and refused is the one shape whose target IS a
+		// directory: only the probe is denied. Left unstaged the row asserts a
+		// behaviour nothing measures, so a resolution that treated an
+		// unmeasurable target as absent-and-fall-back — or that let the raw
+		// EACCES escape factory scope without this module's recovery — would
+		// keep the row green. The refusal is staged where §3.12 allows it to
+		// be: an unsearchable ancestor, the same device the audit side uses.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-seam-refused-"));
+		const blocked = join(base, "blocked");
+		mkdirSync(blocked);
+		const target = join(blocked, "state");
+		mkdirSync(target);
+		try {
+			chmodSync(blocked, 0o000);
+			assert.throws(
+				() => statSync(target),
+				"the arm measures nothing unless the unsearchable ancestor refuses the probe on the seam target",
+			);
+			process.env[SEAM] = target;
+			assert.throws(
+				() => resolveStateRoot(),
+				/is set but unusable/,
+				"a seam target this account cannot measure must refuse with the seam's own message, not fall back to the operational state root and not escape as a raw filesystem error",
+			);
+		} finally {
+			chmodSync(blocked, 0o700);
+			rmSync(base, { recursive: true, force: true });
 		}
 	});
 

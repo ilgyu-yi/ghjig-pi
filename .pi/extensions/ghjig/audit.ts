@@ -54,7 +54,8 @@
  * reachable instance is a mid-write `ENOSPC` on a regular file, and no
  * act on the writer side repairs a line already at rest: the consumer of
  * the trail is the side that must refuse a final line carrying no
- * newline rather than parse it (§3.10, torn write — a reader-side rule).
+ * newline rather than parse it — a lossy fallback refuses what it cannot
+ * process rather than answering a different, weaker question (§3.10).
  *
  * The write-all property is pinned at the SEAM rather than through this
  * function (§3.12). A short write is not stageable through
