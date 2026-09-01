@@ -51,20 +51,45 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ ! -f .github/workflows/check-changelog.sh ]; then
+            echo "::error::.github/workflows/check-changelog.sh is missing — restore it from this repository's history (the substrate onboarding commit ships it)." >&2
+            exit 1
+          fi
+
           # Two independent fetches now feed the gate, so a flaky external
           # call is retried with a short backoff and then fails closed with a
           # message that is explicitly not a missing-fragment failure.
+          #
+          # SPEC §3.10: a delegated call is admitted on OUTPUT VALIDITY alone,
+          # never on the process's exit status — a run that exits 0 with junk
+          # output, or with none, is a failure the caller has to see. Each
+          # call site therefore names a validity predicate, and an attempt
+          # whose output fails it is retried like any other failure.
+          nonempty_object() {
+            [ -n "$1" ] || return 1
+            printf '%s' "$1" | jq -e 'type == "object"' >/dev/null 2>&1
+          }
+
+          # The listing is the paginated shape `--slurp` produces: an array of
+          # pages. `jq -e` rejects a zero-exit body that is not JSON at all,
+          # which the status-only test admitted.
+          nonempty_page_array() {
+            [ -n "$1" ] || return 1
+            printf '%s' "$1" | jq -e 'type == "array"' >/dev/null 2>&1
+          }
+
           fetch_with_retry() {
             local what=$1
-            shift
+            local is_valid=$2
+            shift 2
             local attempt=1
             local out=''
             while [ "$attempt" -le 3 ]; do
-              if out=$("$@"); then
+              if out=$("$@") && "$is_valid" "$out"; then
                 printf '%s' "$out"
                 return 0
               fi
-              echo "check-changelog: attempt ${attempt} to fetch ${what} failed; retrying." >&2
+              echo "check-changelog: attempt ${attempt} to fetch ${what} produced no usable output; retrying." >&2
               sleep "$((attempt * 2))"
               attempt=$((attempt + 1))
             done
@@ -75,7 +100,7 @@ jobs:
           # One call supplies both the allow-set (PR number ∪
           # closingIssuesReferences — the fragment stem may be either, see
           # changelog_unreleased/TEMPLATE.md) and the expected file count.
-          pr_json=$(fetch_with_retry "the PR metadata" \
+          pr_json=$(fetch_with_retry "the PR metadata" nonempty_object \
             gh pr view "$PR_NUM" --repo "$REPO" \
             --json number,closingIssuesReferences,changedFiles)
 
@@ -84,7 +109,7 @@ jobs:
           # file touched and then reverted, and reports a path that is no
           # longer in the checkout. `--slurp` is rejected together with `--jq`
           # by gh, so the shaping happens in a separate jq below.
-          files_json=$(fetch_with_retry "the PR file listing" \
+          files_json=$(fetch_with_retry "the PR file listing" nonempty_page_array \
             gh api --paginate --slurp "repos/${REPO}/pulls/${PR_NUM}/files?per_page=100")
 
           allowed=$(printf '%s' "$pr_json" \

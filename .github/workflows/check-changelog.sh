@@ -25,10 +25,13 @@
 # Exit 0 = pass, exit 1 = block. No third code is in the contract.
 #
 # The predicate is SPEC §1.3's floor over the NET file listing, in two
-# independent clauses, preceded by two fail-closed arms:
+# independent clauses, preceded by three fail-closed arms:
 #
-#   Fail-closed  A flattened length disagreeing with --expected-count
-#                (truncation), and a `status` outside the known set. Both stay
+#   Fail-closed  An empty payload (the gate was handed no listing to read), a
+#                flattened length disagreeing with --expected-count
+#                (truncation), and a `status` outside the known set. Each
+#                carries its own message, so an unread payload is never
+#                reported as a truncated one; and all three stay
 #                distinguishable from clause 1, so a transport-shaped failure
 #                is never reported as "the author forgot a fragment".
 #   Clause 1     Existential, permissive. At least one non-`removed` entry of
@@ -36,10 +39,16 @@
 #                fragment that fails it is merely not a witness.
 #   Clause 2     Universal, no-junk. Every `added`/`renamed`/`copied` entry of
 #                fragment shape is valid; one valid fragment never excuses a
-#                malformed sibling. Exempt: a re-categorising move — an
-#                `added` stem that also appears among the listing's `removed`
-#                stems, or a `renamed` entry whose stem is unchanged — which
-#                was validated when it was first added.
+#                malformed sibling. A re-categorising move — an `added` stem
+#                that also appears among the listing's `removed` fragment
+#                stems, or a `renamed` entry from one fragment path to another
+#                leaving the stem unchanged — is exempt from the allow-set
+#                rule ALONE, because that stem was in the allow-set of the PR
+#                that first added the fragment. Presence, bullet form, the
+#                same-line (#N) ref and the positive-stem rule all still run
+#                on it, so a move cannot carry a content rewrite past the
+#                clause, and a rename from outside changelog_unreleased/ is
+#                an addition rather than a re-categorisation.
 #
 # Residual — what this gate deliberately leaves unreached (§3.11), so each
 # gap reads as a decision rather than an oversight:
@@ -101,8 +110,12 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-if [ -z "$PR" ] || [ -z "$EXPECTED" ]; then
-	echo "::error::check-changelog: --pr and --expected-count are both required. Usage: check-changelog.sh --pr <n> --expected-count <n> --allowed '<stems>' --root <dir>" >&2
+# `--allowed` is required alongside the other two. An absent allow-set is not
+# an empty one: every stem would fail the allow-set rule and the gate would
+# blame the author for a transport-shaped omission, offering two recoveries
+# that cannot clear it.
+if [ -z "$PR" ] || [ -z "$EXPECTED" ] || [ -z "$ALLOWED" ]; then
+	echo "::error::check-changelog: --pr, --expected-count and --allowed are all required. Usage: check-changelog.sh --pr <n> --expected-count <n> --allowed '<stems>' --root <dir>" >&2
 	exit 1
 fi
 
@@ -121,9 +134,14 @@ stem_of() {
 # Prints the first defect of the fragment at `$1` (stem `$2`) and returns 1;
 # returns 0 silently when the fragment is valid. Clause 1 calls it for its
 # verdict only; clause 2 turns the printed defect into an annotation.
+#
+# `$3` = 1 waives the allow-set rule and nothing else. Clause 2's move
+# exemption is its only caller with 1: every other rule keeps running on an
+# exempt entry.
 fragment_defect() {
 	local path=$1
 	local stem=$2
+	local waive_allow_set=${3:-0}
 	local file="$ROOT/$path"
 
 	case "$stem" in
@@ -154,7 +172,7 @@ fragment_defect() {
 		return 1
 	fi
 
-	if ! printf '%s\n' $ALLOWED | grep -qx "$stem"; then
+	if [ "$waive_allow_set" != 1 ] && ! printf '%s\n' $ALLOWED | grep -qx "$stem"; then
 		printf '%s' "Filename stem '$stem' is neither this PR's number (${PR}) nor in closingIssuesReferences. Rename the file to match, or update the PR's Closes/Refs to include #${stem}."
 		return 1
 	fi
@@ -163,6 +181,31 @@ fragment_defect() {
 }
 
 payload=$(cat)
+
+# Fail-closed arm 0 — an empty payload, refused as one. jq reads empty (or
+# blank) input as no document at all and exits 0, so both the listing and the
+# length below come back blank; without this arm the truncation arm renders
+# "returned  file entries" and asserts a partial view of a listing the gate
+# never read. Distinct message, distinct cause.
+if [ -z "${payload//[[:space:]]/}" ]; then
+	echo "::error::The gate was handed an empty PR file listing on stdin, so it read no entries at all. This is a transport failure, not truncation, and NOT a missing-fragment failure; re-run the job." >&2
+	exit 1
+fi
+
+# Splits one @tsv row into its three fields by position. `IFS=$'\t' read` is
+# unusable here: tab is IFS whitespace, so a row whose leading field is empty
+# (an entry the platform sent with no `status`) has that field elided and
+# every later field shifts left — which made the refusal name the filename as
+# the bad status and the status as the empty filename. @tsv escapes any tab
+# inside a value, so splitting on literal tabs is exact.
+split_row() {
+	local row=$1
+	local rest
+	status=${row%%$'\t'*}
+	rest=${row#*$'\t'}
+	filename=${rest%%$'\t'*}
+	previous=${rest#*$'\t'}
+}
 
 # One TSV row per file entry: status, filename, previous_filename.
 if ! listing=$(printf '%s' "$payload" | jq -r '[.[][]] | .[] | [(.status // ""), (.filename // ""), (.previous_filename // "")] | @tsv' 2>/dev/null); then
@@ -187,14 +230,18 @@ fi
 # would read an unknown "add" as "added" and judge on it.
 added_count=0
 removed_stems=""
-while IFS=$'\t' read -r status filename previous; do
+while IFS= read -r row; do
+	split_row "$row"
 	if [ -z "$status" ] && [ -z "$filename" ]; then
 		continue
 	fi
 	case "$status" in
 		added | removed | modified | renamed | copied | changed | unchanged) ;;
 		*)
-			echo "::error::Unrecognized file status '${status}' for '${filename}' in the PR file listing, so the entry could not be classified. This is NOT a missing-fragment failure; re-run the job." >&2
+			# Two causes reach here and only one of them is transient, so the
+			# refusal names a recovery for each rather than the one that is
+			# dead for the cause that will actually produce it.
+			echo "::error::Unrecognized file status '${status}' for '${filename}' in the PR file listing, so the entry could not be classified. This is NOT a missing-fragment failure. Two causes reach this arm: a partial entry from the platform, which is transient — re-run the job; or a new status in the platform's enum, which re-running can never clear — apply the 'skip-changelog' label to unblock this PR, then add the status to the known set in .github/workflows/check-changelog.sh." >&2
 			exit 1
 			;;
 	esac
@@ -210,7 +257,8 @@ done <<< "$listing"
 # Clause 2 — universal no-junk. Every offender is annotated in one run, then
 # the gate fails after the loop.
 bad=0
-while IFS=$'\t' read -r status filename previous; do
+while IFS= read -r row; do
+	split_row "$row"
 	if [ -z "$filename" ]; then
 		continue
 	fi
@@ -223,30 +271,43 @@ while IFS=$'\t' read -r status filename previous; do
 	fi
 	stem=$(stem_of "$filename")
 
-	# Move exemption — a re-categorisation of an already-merged fragment,
-	# in either shape the platform may report it.
+	# Move exemption — a re-categorisation of an already-merged fragment, in
+	# either shape the platform may report it. It waives the allow-set rule
+	# and nothing else: the stem was in the allow-set of the PR that first
+	# added the fragment, so re-checking it against this PR's would refuse a
+	# move §1.3's floor permits — but content, presence, bullet form, the
+	# same-line (#N) ref and the positive-stem rule keep running, so the move
+	# cannot smuggle an arbitrary rewrite past the clause.
+	#
+	# The `renamed` arm requires the PREVIOUS path to be a fragment too. A
+	# rename into changelog_unreleased/ from anywhere else was never validated
+	# by this gate, so it is an addition and carries an addition's burden;
+	# comparing basename stems alone would exempt it.
+	exempt=0
 	if [ "$status" = "added" ] && printf '%s' "$removed_stems" | grep -qx "$stem"; then
-		continue
+		exempt=1
 	fi
-	if [ "$status" = "renamed" ] && [ -n "$previous" ] && [ "$(stem_of "$previous")" = "$stem" ]; then
-		continue
+	if [ "$status" = "renamed" ] && [ -n "$previous" ] && is_fragment "$previous" &&
+		[ "$(stem_of "$previous")" = "$stem" ]; then
+		exempt=1
 	fi
 
-	if ! defect=$(fragment_defect "$filename" "$stem"); then
+	if ! defect=$(fragment_defect "$filename" "$stem" "$exempt"); then
 		echo "::error file=${filename}::${defect}" >&2
 		bad=1
 	fi
 done <<< "$listing"
 
 if [ "$bad" = 1 ]; then
-	echo "::error::One or more fragments added by this PR failed validation. Every added fragment must satisfy all rules (positive-integer stem, leading '- ' bullet, (#<N>) ref matching the stem on the same line, stem in the PR/issue allow-set) — one valid fragment does not excuse a malformed sibling. See changelog_unreleased/TEMPLATE.md." >&2
+	echo "::error::One or more fragments added, renamed or copied by this PR failed validation. Every added, renamed or copied fragment must satisfy all rules (positive-integer stem, leading '- ' bullet, (#<N>) ref matching the stem on the same line, stem in the PR/issue allow-set) — one valid fragment does not excuse a malformed sibling. See changelog_unreleased/TEMPLATE.md." >&2
 	exit 1
 fi
 
 # Clause 1 — existential floor. A `removed` entry is never a witness and is
 # never read: at PR head it is not on disk.
 witness=""
-while IFS=$'\t' read -r status filename previous; do
+while IFS= read -r row; do
+	split_row "$row"
 	if [ -z "$filename" ]; then
 		continue
 	fi
