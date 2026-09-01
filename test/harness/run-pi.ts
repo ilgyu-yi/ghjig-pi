@@ -28,6 +28,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -245,6 +246,36 @@ export function readSessionEntries(fixture: Fixture): Array<Record<string, unkno
 /** Raw lines of the audit file under the fixture's seam root. */
 export function readAuditLines(fixture: Fixture): string[] {
 	return readFileSync(fixture.auditFile, "utf8").split("\n").filter((line) => line !== "");
+}
+
+/**
+ * Sorted recursive listing where every entry carries its size — the form
+ * for "this tree is unchanged", as against `listTreeEntries`' "this tree
+ * gained no entry". Names alone are identical before and after an APPEND
+ * into a file that was already there, which is exactly the shape an
+ * operational-sink isolation arm is most owed: a suite that adds a line to
+ * a trail an operational writer already created has polluted the evidence
+ * surface without adding an entry to it (§5.5).
+ *
+ * `lstat`, never `stat`: a link in the tree is reported as the link it is
+ * rather than followed out of the tree being snapshotted.
+ */
+export function listTreeSizes(dir: string): string[] {
+	const found: string[] = [];
+	const walk = (current: string, prefix: string): void => {
+		for (const item of readdirSync(current, { withFileTypes: true })) {
+			const rel = prefix === "" ? item.name : `${prefix}/${item.name}`;
+			const info = lstatSync(join(current, item.name));
+			if (info.isDirectory()) {
+				found.push(`${rel}/`);
+				walk(join(current, item.name), rel);
+			} else {
+				found.push(`${rel} ${info.size}`);
+			}
+		}
+	};
+	walk(dir, "");
+	return found.sort();
 }
 
 /** Sorted recursive listing (relative paths) — for zero-new-entries assertions. */

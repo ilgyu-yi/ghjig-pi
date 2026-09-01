@@ -23,16 +23,23 @@
  *   - no action method at extension load, checked against the D1-calibrated
  *     failure class (§3.2; §3.9 refuse-not-approve);
  *   - D2 tree isolation: `git status --porcelain` identical before/after,
- *     and the operational state root `<repo>/.ghjig/state/` absent on both
- *     sides (§5.5 — the seam, never the operational sink). The assertion
- *     targets `.ghjig/state/` rather than all of `.ghjig/` because `.ghjig/`
- *     legitimately holds per-clone untracked binding state in a working
- *     clone (§4.1); the runtime's own sink is what must stay untouched.
+ *     and the operational state root `<repo>/.ghjig/state/` in the same
+ *     state after the suite as before it — same absence, or the same
+ *     entries at the same sizes, so a suite appending into a trail that
+ *     already existed is caught too and not only one adding a file, which
+ *     `/.ghjig/` being git-ignored keeps out of the porcelain arm (§5.5 —
+ *     the seam, never the operational sink). The
+ *     assertion targets `.ghjig/state/` rather than all of `.ghjig/` because
+ *     `.ghjig/` legitimately holds per-clone untracked binding state in a
+ *     working clone (§4.1); the runtime's own sink is what must stay
+ *     untouched.
  *   - polluted-ambient re-run: byte-identical resolution and zero writes
- *     into a decoy tree (§4.6).
+ *     into a decoy tree (§4.6), under a positive control that the decoy
+ *     variables reached the child process — without it the block would pass
+ *     just as well on a run that was never polluted.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -46,6 +53,7 @@ import {
 	gitPorcelain,
 	isLoadTimeActionFailure,
 	listTreeEntries,
+	listTreeSizes,
 	type PiRunResult,
 	readAuditLines,
 	readSessionEntries,
@@ -58,8 +66,38 @@ import {
 const OPERATIONAL_STATE_ROOT = join(repoRoot(), ".ghjig", "state");
 const DECOY_VARS = ["GHJIG_ROOT", "GHJIG_STATE_ROOT", "GHJIG_PI_ROOT", "PI_STATE_ROOT"] as const;
 
+/**
+ * The operational state root as a snapshot: `undefined` when it is absent,
+ * otherwise every entry under it WITH ITS SIZE. Existence alone would not
+ * catch a suite that writes INTO a root an operational writer had already
+ * created, and `/.ghjig/` is git-ignored, so the porcelain arm does not
+ * catch it either. Names alone would not either: the shape this arm is
+ * most owed is a suite appending a line to a trail that was already there,
+ * and an append changes no name. The size is what makes that visible.
+ */
+function snapshotOf(dir: string): string[] | undefined {
+	return existsSync(dir) ? listTreeSizes(dir) : undefined;
+}
+
+function operationalSnapshot(): string[] | undefined {
+	return snapshotOf(OPERATIONAL_STATE_ROOT);
+}
+
 const SCRIPT: ScriptTurn[] = [
 	{ kind: "toolCall", name: "bash", arguments: { command: "echo GHJIG_IT_TOOL_RAN" } },
+	{ kind: "text", text: "GHJIG_IT_DONE" },
+];
+
+/**
+ * The polluted run's script differs from `SCRIPT` in one respect: its tool
+ * call reports the ambient environment the child actually received. The
+ * witness is read back out of the session JSONL, so the block's
+ * immunity claims rest on a run that is demonstrably polluted rather than on
+ * the builder's intent to pollute it.
+ */
+const DECOY_WITNESS = "GHJIG_DECOY_SEEN";
+const POLLUTED_SCRIPT: ScriptTurn[] = [
+	{ kind: "toolCall", name: "bash", arguments: { command: `echo "${DECOY_WITNESS}=[$GHJIG_ROOT]"` } },
 	{ kind: "text", text: "GHJIG_IT_DONE" },
 ];
 
@@ -101,7 +139,7 @@ function requireAudit(fixture: Fixture, result: PiRunResult): string[] {
 }
 
 let porcelainBefore: string;
-let operationalRootExistedBefore: boolean;
+let operationalBefore: string[] | undefined;
 let cleanFixture: Fixture;
 let cleanRun: PiRunResult;
 let d1Fixture: Fixture;
@@ -122,7 +160,7 @@ let decoyEntriesBefore: string[];
 before(async () => {
 	// D2 snapshot — taken before any run.
 	porcelainBefore = gitPorcelain();
-	operationalRootExistedBefore = existsSync(OPERATIONAL_STATE_ROOT);
+	operationalBefore = operationalSnapshot();
 
 	// Run 1: clean scripted session against the repo-tree runtime.
 	cleanFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
@@ -141,7 +179,7 @@ before(async () => {
 	mkdirSync(join(decoyTree, ".ghjig", "state"), { recursive: true });
 	writeFileSync(join(decoyTree, ".pi", "extensions", "look-alike.ts"), "// decoy\n");
 	decoyEntriesBefore = listTreeEntries(decoyTree);
-	pollutedFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	pollutedFixture = buildFixture({ script: POLLUTED_SCRIPT, linkGhjigRuntime: true });
 	const decoyEnv: Record<string, string> = {};
 	for (const name of DECOY_VARS) {
 		decoyEnv[name] = decoyTree;
@@ -312,6 +350,21 @@ describe("AC3: audit record encoding, demonstrated on the live run (§5.5)", () 
 });
 
 describe("AC4: polluted ambient environment (§4.6)", () => {
+	it("positive control: the decoy variables reached the child process", () => {
+		// Every other arm in this block asserts that the decoys changed
+		// nothing. That claim is only worth something if the decoys were
+		// there: the run's own tool call echoes GHJIG_ROOT back into the
+		// session JSONL, so the pollution is measured on the child, not
+		// assumed from the environment the harness assembled.
+		const witness = readSessionEntries(pollutedFixture).some((entry) =>
+			JSON.stringify(entry).includes(`${DECOY_WITNESS}=[${decoyTree}]`),
+		);
+		assert.ok(
+			witness,
+			`the polluted run never reported ${DECOY_WITNESS}=[${decoyTree}]: the decoy variables did not reach the child, so every immunity assertion in this block is vacuous\n${diagnostics(pollutedRun)}`,
+		);
+	});
+
 	it("the polluted run completes (exit 0, no timeout)", () => {
 		assert.equal(pollutedRun.exitCode, 0, diagnostics(pollutedRun));
 	});
@@ -383,9 +436,48 @@ describe("AC4: the harness seam has exactly one door (§4.6)", () => {
 });
 
 describe("AC2/D2: repository-tree isolation snapshot", () => {
-	it("leaves the operational state root absent (never created by test runs)", () => {
-		assert.equal(operationalRootExistedBefore, false, `${OPERATIONAL_STATE_ROOT} existed before the suite ran`);
-		assert.equal(existsSync(OPERATIONAL_STATE_ROOT), false, `${OPERATIONAL_STATE_ROOT} was created by the suite`);
+	it("writes nothing at the operational state root (§5.5)", () => {
+		// The claim is about what this suite did, not about what happens to be
+		// on disk: the root after the suite equals the root before it. Stated as
+		// an absolute absence the arm would also fail on a clone where an
+		// operational writer had legitimately created the root, and would stop
+		// measuring the suite the moment such a writer exists. Stated as mere
+		// existence — or as the entry NAMES alone, which an append leaves
+		// untouched — it would miss the shape it is most owed: a suite
+		// appending into a trail that was already there, which `/.ghjig/`
+		// being git-ignored keeps out of the porcelain arm below as well. So
+		// the comparison is each entry with its size, and absence is one of
+		// its values.
+		assert.deepEqual(
+			operationalSnapshot(),
+			operationalBefore,
+			`${OPERATIONAL_STATE_ROOT} changed across the suite: a test run must resolve state to a disposable root and never touch the operational sink`,
+		);
+	});
+
+	it("takes a snapshot an append into an existing entry moves (§5.5)", () => {
+		// The arm above compares a root that is ABSENT in this tree, so it
+		// reads `undefined === undefined` and would say the same whether the
+		// snapshot carried sizes or only names. What it is most owed is the
+		// append — a line added to a trail an operational writer had already
+		// created, which changes no entry name — and that is a property of
+		// `snapshotOf`, not of today's disk. Measured here on a disposable
+		// root, because staging it at the operational root would be the very
+		// write this block forbids.
+		const probe = mkdtempSync(join(tmpdir(), "ghjig-d2-mechanism-"));
+		try {
+			const sink = join(probe, AUDIT_FILE_NAME);
+			writeFileSync(sink, `${JSON.stringify({ pre: "existing" })}\n`);
+			const before = snapshotOf(probe);
+			appendFileSync(sink, `${JSON.stringify({ leaked: "by the suite" })}\n`);
+			assert.notDeepEqual(
+				snapshotOf(probe),
+				before,
+				`an append into an entry that was already there left the snapshot identical (${JSON.stringify(before)}): the arm above would report a clean operational root on a clone where a writer had created one`,
+			);
+		} finally {
+			rmSync(probe, { recursive: true, force: true });
+		}
 	});
 
 	it("leaves git status --porcelain byte-identical to the pre-suite snapshot", () => {

@@ -22,8 +22,19 @@
  * Every refusal names its own live recovery (§3.11), because the
  * surrounding substrate otherwise offers the operator only a total
  * extension-layer disarm.
+ *
+ * The seam target is measured with ONE probe. Measured with two —
+ * `existsSync` then `statSync` — a target that stopped being measurable
+ * between them made the second probe throw a raw filesystem error, and
+ * `resolveStateRoot` is called at extension-factory scope, so that error
+ * escaped the same way a refusal does but carrying neither this module's
+ * refusal text nor its `RECOVERY` string, the remediation every arm here
+ * otherwise owes. The two probes answered the same question and produced
+ * the same refusal, so collapsing them closes the window rather than
+ * enumerating it: missing, not a directory, and refused are one answer,
+ * and every one of them refuses with the recovery attached.
  */
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { locateRepoRoot } from "./locate.ts";
 
@@ -42,6 +53,19 @@ const RECOVERY =
 	`Recovery: unset ${STATE_SEAM} to use the operational state root, ` +
 	`or point it at an existing absolute directory.`;
 
+/**
+ * True iff `path` is a directory. One probe, one answer: a refused probe
+ * is not a directory, and it is not a throw either — the raw error would
+ * escape factory scope without this module's refusal text or `RECOVERY`.
+ */
+function isDirectory(path: string): boolean {
+	try {
+		return statSync(path).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
 export function resolveStateRoot(): StateRootResolution {
 	const seam = process.env[STATE_SEAM];
 	if (seam === undefined) {
@@ -54,9 +78,10 @@ export function resolveStateRoot(): StateRootResolution {
 				`no fallback toward the operational state root (§3.9, §5.5). ${RECOVERY}`,
 		);
 	}
-	if (!existsSync(seam) || !statSync(seam).isDirectory()) {
+	if (!isDirectory(seam)) {
 		throw new Error(
-			`[ghjig] ${STATE_SEAM} is set but unusable (${seam} is missing or not a directory): ` +
+			`[ghjig] ${STATE_SEAM} is set but unusable (${seam} is not a directory this account can ` +
+				`measure — missing, not a directory, or refused): ` +
 				`refusing the run — no fallback toward the operational state root (§3.9, §5.5). ${RECOVERY}`,
 		);
 	}

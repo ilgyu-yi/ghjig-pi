@@ -30,7 +30,9 @@ export const POSTURES: readonly PostureRow[] = [
 	},
 	{
 		dependency: "seam-target",
-		failureShape: "GHJIG_TEST_STATE_ROOT set but empty, relative, missing, or not a directory",
+		failureShape:
+			"GHJIG_TEST_STATE_ROOT set but empty, relative, or not measurable as a directory by this account " +
+			"(missing, not a directory, or refused)",
 		posture: "closed",
 		justification:
 			"Present but cannot measure refuses the run (§3.9); a fallback would write the operational evidence surface from a test context — exactly what §5.5 forbids.",

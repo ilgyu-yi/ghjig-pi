@@ -7,27 +7,66 @@
  *   - audit.ts    — one JSON object per line; free text encoded at write
  *                   time so embedded newlines/control characters never
  *                   split a record (§5.5); append to a missing destination
- *                   fails open without throwing (§3.9 posture row).
+ *                   fails open without throwing (§3.9 posture row); the
+ *                   sink is the path the consuming gate reads and nothing
+ *                   else (§4.6), readable only by the account that writes
+ *                   it (§5.5), and its degradation signal names a recovery
+ *                   that is live where it is emitted — one per object to
+ *                   repair, never one clause shared across objects that
+ *                   owe different acts (§3.11). The write itself never
+ *                   returns having landed only part of a record, measured
+ *                   at the seam the append calls (§3.12). A state root
+ *                   that is not absolute is refused rather than resolved
+ *                   against the process working directory, which would
+ *                   put the trail outside the repository it is about and
+ *                   report success (§4.6, §5.5).
  *   - state-root.ts — resolution matrix: no seam → operational path
  *                   computed, nothing created; seam → override with
  *                   `seamActive: true`; malformed/unusable seam → refusal,
  *                   never a fallback to the operational sink (§5.5, §3.9).
  *   - locate.ts   — self-location from the installed module path: cwd-
- *                   independent, immune to decoy ambient variables (§4.6),
- *                   and bounded below by the install root so a `.pi/`
- *                   inside the install tree can never become the
- *                   repository root (§4.7).
+ *                   independent for every entry (§4.6), immune to decoy
+ *                   ambient variables (§4.6), bounded below by the install
+ *                   root — decided component-wise, so a directory whose
+ *                   name merely shares a prefix with the traversal token
+ *                   is bounded like any other (§4.6, §4.7) — and answering
+ *                   rather than throwing when the filesystem refuses a
+ *                   probe (§3.9 `repo-root-discovery`).
  *   - postures.ts — the §3.9 fail-posture inventory: exactly the three
  *                   shipped dependencies, each with a posture, and every
  *                   fail-closed row with an in-place justification.
+ *
+ * One arm measures this suite rather than the runtime: the containment
+ * guard the recovery arms perform behind is itself asserted, because a
+ * guard nothing measures is decoration (§3.12) and this one is what
+ * stands between a mutated clause and an act on the host.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import {
+	chmodSync,
+	closeSync,
+	constants,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	openSync,
+	readFileSync,
+	readSync,
+	realpathSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { appendAuditRecord } from "../.pi/extensions/ghjig/audit.ts";
+// The sink's name comes from the runtime itself: an arm that plants a symlink
+// or reads a mode has to address exactly the path the runtime appends to, so a
+// rename there moves the arm with it instead of quietly aiming it elsewhere.
+import { appendAuditRecord, AUDIT_FILE_NAME, recoveryFor, writeRecordLine } from "../.pi/extensions/ghjig/audit.ts";
 import { locateRepoRoot, locateRepoRootFrom } from "../.pi/extensions/ghjig/locate.ts";
 import { POSTURES } from "../.pi/extensions/ghjig/postures.ts";
 import { resolveStateRoot } from "../.pi/extensions/ghjig/state-root.ts";
@@ -141,6 +180,595 @@ describe("audit primitive: one-line encoded records (§5.5)", () => {
 	});
 });
 
+describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", () => {
+	const INPUT = { category: "test", action: "sink", text: "evidence" };
+
+	/**
+	 * The clause reader below delimits a path at whitespace, so on a host
+	 * whose temporary directory carries whitespace it reads a TRUNCATED
+	 * path — and the arms that perform what a clause names then either act
+	 * on something the fixture does not own or refuse a clause production
+	 * emitted correctly. Both are results about the host, not about the
+	 * code under test (§3.12), so those arms measure nothing here and say
+	 * so rather than reporting a red the clause did not earn.
+	 *
+	 * Widening the reader is not the fix available: the whitespace IS the
+	 * only signal saying where the path production named ends, and ending
+	 * it instead at whatever happens to exist on disk would repair the
+	 * clause toward what the arm hoped to read — the one move these arms
+	 * exist to refuse. Delimiting the path in the production message would
+	 * fix it at the source, for the operator pasting it into a shell as
+	 * much as for this reader; that is a change to operator-facing text
+	 * and is not made here.
+	 */
+	const CLAUSE_PATH_UNREADABLE: string | false = /\s/.test(tmpdir())
+		? "the fixture base path carries whitespace, which the recovery-clause reader cannot delimit"
+		: false;
+
+	/** The recovery clause of a degradation signal, if the signal carries one. */
+	function recoveryClause(warning: string): string | undefined {
+		return /Recovery:\s*(.+)$/s.exec(warning)?.[1];
+	}
+
+	/**
+	 * The object a recovery clause names. An arm that RUNS the recovery
+	 * rather than matching its prose needs one machine-readable handle on
+	 * it, and a clause naming the wrong object is exactly what these arms
+	 * are for: the handle is read raw, never repaired toward whatever the
+	 * arm was hoping for. Absolute-path shape is POSIX here; a host with
+	 * another path grammar needs this reader widened, not the contract.
+	 */
+	function pathNamedIn(clause: string): string | undefined {
+		const found = /(\/[^\s'"`]+)/.exec(clause)?.[1];
+		return found === undefined ? undefined : found.replace(/[.,;:)'"`]+$/, "");
+	}
+
+	/**
+	 * The directory a recovery clause tells the operator to create: the path
+	 * it names, or the directory holding it when what it names is the sink
+	 * file inside that directory.
+	 */
+	function destinationNamedIn(clause: string): string | undefined {
+		const path = pathNamedIn(clause);
+		if (path === undefined) {
+			return undefined;
+		}
+		return path.endsWith(`/${AUDIT_FILE_NAME}`) ? dirname(path) : path;
+	}
+
+	/**
+	 * The physical form of a path whose tail need not exist: every component
+	 * that is on disk resolved through its links, with the remainder
+	 * appended as written. `realpathSync` alone cannot answer for the paths
+	 * these arms handle — the destination a clause names is often exactly
+	 * what is missing, since creating it is the act — so the walk stops at
+	 * the deepest ancestor that resolves. That is enough for containment:
+	 * a link can only redirect a component that exists.
+	 */
+	function physicalPath(path: string): string {
+		let existing = resolve(path);
+		const tail: string[] = [];
+		for (;;) {
+			try {
+				const resolved = realpathSync(existing);
+				return tail.length === 0 ? resolved : join(resolved, ...tail);
+			} catch {
+				const parent = dirname(existing);
+				if (parent === existing) {
+					// Not reachable from an absolute path, whose root always
+					// resolves; textual normalisation is all that is left.
+					return resolve(path);
+				}
+				tail.unshift(basename(existing));
+				existing = parent;
+			}
+		}
+	}
+
+	/**
+	 * Refuses to perform a clause that names a path the fixture does not own.
+	 *
+	 * The arms below carry out the act their clause prescribes — a recursive
+	 * delete, a chmod — on a path chosen by the very function under test, and
+	 * this project mutates that function as routine (§3.12). A mutant that
+	 * makes a clause name something outside the fixture would have the suite
+	 * perform the act THERE, on the host: the delete arm was reproduced doing
+	 * exactly that. Containment is asserted BEFORE the act, never inside
+	 * `perform`, whose catch would fold the refusal into a description string
+	 * and report it as a dead recovery instead of as the out-of-fixture reach
+	 * it is. The fixture root itself is admissible because two arms name it as
+	 * their live object; anything above or beside it is not.
+	 */
+	function assertInsideFixture(named: string, fixture: string): void {
+		// Physical, not textual: `resolve()` alone normalises `<fixture>/../
+		// ../victim`, which a bare prefix test admits, but it does not follow
+		// links — and §4.6 asks this comparison for RESOLVED PHYSICAL paths
+		// precisely because a symlinked component inside the fixture puts the
+		// performed act outside it while the textual form still reads as
+		// contained. Neither escape is reachable through today's
+		// `recoveryFor`, whose paths all pass through `join`/`dirname`, and no
+		// fixture here holds a link; the guard resolves both operands anyway,
+		// because a containment check that rests on a property of the fixture
+		// is the same defect as one resting on a property of the function it
+		// is guarding against, one level down.
+		const here = physicalPath(named);
+		const root = physicalPath(fixture);
+		assert.ok(
+			here === root || here.startsWith(root + sep),
+			`the recovery clause names ${named}, which the fixture at ${fixture} does not own. This arm PERFORMS what the clause names, so it refuses to act rather than reach outside the fixture — the selection that produced this path is what the arm exists to measure, and a guard that destroys evidence when it fires is the wrong shape`,
+		);
+	}
+
+	/** Performs `act`, reporting what happened for the arm's failure message. */
+	function perform(description: string, act: () => void): string {
+		try {
+			act();
+			return description;
+		} catch (error) {
+			return `${description} — could not be performed: ${String(error)}`;
+		}
+	}
+
+	it("refuses a clause path that leaves the fixture through a symlinked component (§4.6)", () => {
+		// The containment guard is the only thing between a mutated clause and
+		// an act on the host, and a guard this suite never measures is
+		// decoration (§3.12). Textual containment admits a path through a link
+		// inside the fixture: the arm below stages one and asserts the guard
+		// refuses it, then asserts it still admits an ordinary path the
+		// fixture does own — a guard that refuses everything contains nothing.
+		const fixture = mkdtempSync(join(tmpdir(), "ghjig-guard-fixture-"));
+		const outside = mkdtempSync(join(tmpdir(), "ghjig-guard-outside-"));
+		try {
+			const precious = join(outside, "precious");
+			writeFileSync(precious, "a file no arm of this suite may reach");
+			symlinkSync(outside, join(fixture, "link"));
+			const escape = join(fixture, "link", "precious");
+			assert.throws(
+				() => assertInsideFixture(escape, fixture),
+				/does not own/,
+				`the guard admits ${escape}, which really resolves to ${precious}: an arm performing what a clause names would delete or chmod outside the fixture it is contained to, and the fixture holding no link is not a property the guard may rest on`,
+			);
+			assert.doesNotThrow(
+				() => assertInsideFixture(join(fixture, "no-such-dir", "deeper"), fixture),
+				"the guard refuses a path the fixture does own — a guard that refuses everything contains nothing, and the destinations these arms create do not exist yet",
+			);
+		} finally {
+			rmSync(fixture, { recursive: true, force: true });
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a state root that is not absolute rather than writing the trail beside the process (§4.6, §5.5)", () => {
+		// A relative or empty root has no anchor but the process working
+		// directory, so the sink would land wherever the process happens to
+		// stand — outside the repository whose work it records — and the
+		// append would report success. Unreachable through `resolveStateRoot`,
+		// which refuses an empty or relative seam; the refusal is measured
+		// here because that reach argument is a property of today's only
+		// caller, and the mirror-image precondition on `locateRepoRootFrom`
+		// was closed on exactly this reasoning.
+		const elsewhere = mkdtempSync(join(tmpdir(), "ghjig-audit-cwd-"));
+		const savedCwd = process.cwd();
+		try {
+			process.chdir(elsewhere);
+			for (const root of ["", "state", join("..", "state")]) {
+				const { value, warnings } = captureWarnings(() => appendAuditRecord(root, INPUT));
+				assert.equal(value, false, `a state root of ${JSON.stringify(root)} was accepted`);
+				assert.equal(
+					warnings.length,
+					1,
+					`expected one degradation signal for ${JSON.stringify(root)}, got ${JSON.stringify(warnings)}`,
+				);
+				assert.ok(
+					recoveryClause(warnings[0] ?? "") !== undefined,
+					`the refusal states no way to restore the trail: ${JSON.stringify(warnings)}`,
+				);
+			}
+			assert.equal(
+				existsSync(join(elsewhere, AUDIT_FILE_NAME)),
+				false,
+				"the audit trail was written into the process working directory: evidence about one repository came to rest wherever the process stood",
+			);
+		} finally {
+			process.chdir(savedCwd);
+			rmSync(elsewhere, { recursive: true, force: true });
+		}
+	});
+
+	it("leaves a symlink's target untouched: the record lands at the audit path itself (§4.6)", () => {
+		// Write-target equals read-target: a link planted at the sink path must
+		// not send the evidence somewhere the consuming gate never reads.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-link-"));
+		try {
+			const elsewhere = join(stateRoot, "elsewhere");
+			mkdirSync(elsewhere);
+			const target = join(elsewhere, "captured.log");
+			writeFileSync(target, "");
+			symlinkSync(target, join(stateRoot, AUDIT_FILE_NAME));
+			captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			assert.equal(
+				readFileSync(target, "utf8"),
+				"",
+				"the audit record was written through the symlink into its target: the evidence sink is redirectable",
+			);
+		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("creates the sink readable only by the account that writes it (§5.5)", {
+		// POSIX permission bits. On a host that does not carry them the mode
+		// says nothing about who may read the file, so the arm measures nothing
+		// rather than reporting a result it cannot support.
+		skip: process.platform === "win32" ? "POSIX permission bits" : false,
+	}, () => {
+		// The umask is normalised to 0 for the measurement. Left at the host's
+		// default this arm would pass on any machine whose umask already masks
+		// group and other, without the writer ever declaring a mode — the
+		// vacuous pass the mode contract exists to rule out.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-mode-"));
+		const savedUmask = process.umask(0o000);
+		try {
+			appendAuditRecord(stateRoot, INPUT);
+			assert.equal(
+				(statSync(join(stateRoot, AUDIT_FILE_NAME)).mode & 0o777).toString(8),
+				"600",
+				"the audit sink is created under the ambient umask: an audit record names what a repository's work touched, and a host may carry accounts that work never concerned",
+			);
+		} finally {
+			process.umask(savedUmask);
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("names a recovery in the degraded-append signal (§3.11)", () => {
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-signal-"));
+		try {
+			const { warnings } = captureWarnings(() =>
+				appendAuditRecord(join(stateRoot, "no-such-dir", "deeper"), INPUT),
+			);
+			assert.ok(
+				recoveryClause(warnings[0] ?? "") !== undefined,
+				`the degradation signal states cause and consequence but no way to restore the trail: ${JSON.stringify(warnings)}`,
+			);
+		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("names a recovery that is live at this surface: performing it restores the trail (§3.11)", {
+		skip: CLAUSE_PATH_UNREADABLE,
+	}, () => {
+		// Asserted by running the recovery, not by matching its prose: the arm
+		// creates the destination the signal names and appends again. A signal
+		// naming a recovery that does not restore the trail is worse than one
+		// naming none.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-recovery-"));
+		try {
+			const missing = join(stateRoot, "no-such-dir", "deeper");
+			const { warnings } = captureWarnings(() => appendAuditRecord(missing, INPUT));
+			const clause = recoveryClause(warnings[0] ?? "");
+			const destination = clause === undefined ? undefined : destinationNamedIn(clause);
+			if (destination !== undefined) {
+				// This arm CREATES what the clause names, so it is contained
+				// like the three that delete and chmod: `mkdir -p` at a
+				// clause-chosen path reaches as far outside the fixture as the
+				// clause does, and this was the one performing arm without the
+				// guard.
+				assertInsideFixture(destination, stateRoot);
+				mkdirSync(destination, { recursive: true });
+			}
+			const restored = captureWarnings(() => appendAuditRecord(missing, INPUT)).value;
+			assert.equal(
+				restored,
+				true,
+				`following the recovery the signal named did not restore the audit trail. signal: ${JSON.stringify(warnings[0])}; recovery clause: ${JSON.stringify(clause)}; destination created: ${JSON.stringify(destination)}`,
+			);
+		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("names a live recovery when an ancestor of the destination is a plain file (§3.11)", {
+		skip: CLAUSE_PATH_UNREADABLE,
+	}, () => {
+		// `<repo>/.ghjig` existing as a file is an honest mistake, not a hostile
+		// one, so this arm is owed a live recovery. Nothing can be created
+		// beneath a plain file, so a clause naming the sink path prescribes an
+		// act the operator cannot perform: the live object is the non-directory
+		// component. The arm performs the clause on exactly the path the clause
+		// names — replacing it with a directory — and never repairs that path
+		// toward the one it was hoping for.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-audit-notdir-"));
+		try {
+			writeFileSync(join(base, ".ghjig"), "a file where a directory was meant");
+			const stateRoot = join(base, ".ghjig", "state");
+			const { warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			const clause = recoveryClause(warnings[0] ?? "");
+			const named = clause === undefined ? undefined : pathNamedIn(clause);
+			if (named !== undefined) {
+				assertInsideFixture(named, base);
+			}
+			const performed =
+				named === undefined
+					? "no path named"
+					: perform(`replaced ${named} with a directory, then created ${stateRoot}`, () => {
+							rmSync(named, { recursive: true, force: true });
+							mkdirSync(stateRoot, { recursive: true });
+						});
+			assert.equal(
+				captureWarnings(() => appendAuditRecord(stateRoot, INPUT)).value,
+				true,
+				`the signal names a recovery that is dead where it is emitted. signal: ${JSON.stringify(warnings[0])}; recovery clause: ${JSON.stringify(clause)}; performing it: ${performed}`,
+			);
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("names a live recovery when the destination directory refuses the create (§3.11)", {
+		// POSIX permission bits, and an account the mode actually binds: for a
+		// superuser the directory refuses nothing, so the arm would measure the
+		// message against a failure that never occurred.
+		skip:
+			CLAUSE_PATH_UNREADABLE ||
+			(process.platform === "win32"
+				? "POSIX permission bits"
+				: process.getuid?.() === 0
+					? "the directory mode refuses nothing for this account"
+					: false),
+	}, () => {
+		// `.ghjig/state` created with restrictive permissions is an honest
+		// mistake. The sink does not exist and cannot be created, so a clause
+		// naming the sink prescribes an act on an object that is not there; the
+		// live object is the directory's mode.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-refuse-"));
+		try {
+			chmodSync(stateRoot, 0o500);
+			const { value, warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			assert.equal(value, false, "the arm measures nothing unless the directory mode refuses the create");
+			const clause = recoveryClause(warnings[0] ?? "");
+			const named = clause === undefined ? undefined : pathNamedIn(clause);
+			if (named !== undefined) {
+				assertInsideFixture(named, stateRoot);
+			}
+			const performed =
+				named === undefined
+					? "no path named"
+					: perform(`granted this account write and search permission on ${named}`, () =>
+							chmodSync(named, 0o700),
+						);
+			assert.equal(
+				captureWarnings(() => appendAuditRecord(stateRoot, INPUT)).value,
+				true,
+				`the signal names a recovery that is dead where it is emitted. signal: ${JSON.stringify(warnings[0])}; recovery clause: ${JSON.stringify(clause)}; performing it: ${performed}`,
+			);
+		} finally {
+			chmodSync(stateRoot, 0o700);
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps the destination-mode recovery off the unsearchable-ancestor shape (§3.11)", {
+		// The whitespace condition is disqualifying here for the opposite
+		// reason to the performing arms: a truncated parse makes this arm's
+		// `notEqual` pass on any clause at all, so it would report a green it
+		// did not measure.
+		skip:
+			CLAUSE_PATH_UNREADABLE ||
+			(process.platform === "win32"
+				? "POSIX permission bits"
+				: process.getuid?.() === 0
+					? "the directory mode refuses nothing for this account"
+					: false),
+	}, () => {
+		// An ANCESTOR of the destination refuses the search, so the destination
+		// cannot be measured at all — and its own mode already admits this
+		// account. A clause naming it prescribes a chmod that changes nothing:
+		// this shape is unmodelled and belongs to the general arm. Without the
+		// guard that keeps the destination-mode arm off it, the EACCES code
+		// alone would select the dead clause.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-audit-unsearchable-"));
+		const blocked = join(base, "blocked");
+		mkdirSync(blocked);
+		const stateRoot = join(blocked, "state");
+		mkdirSync(stateRoot);
+		try {
+			chmodSync(blocked, 0o000);
+			const { value, warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			assert.equal(value, false, "the arm measures nothing unless the unsearchable ancestor refuses the open");
+			const clause = recoveryClause(warnings[0] ?? "");
+			assert.notEqual(
+				clause === undefined ? undefined : pathNamedIn(clause),
+				stateRoot,
+				`the signal prescribes an act on ${stateRoot}, whose own mode already admits this account: the refusal came from an ancestor that cannot be searched, so performing the clause changes nothing. signal: ${JSON.stringify(warnings[0])}`,
+			);
+		} finally {
+			chmodSync(blocked, 0o700);
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("names a live recovery when the sink's own mode refuses the append (§3.11)", {
+		skip:
+			CLAUSE_PATH_UNREADABLE ||
+			(process.platform === "win32"
+				? "POSIX permission bits"
+				: process.getuid?.() === 0
+					? "the sink mode refuses nothing for this account"
+					: false),
+	}, () => {
+		// The destination directory admits this account and the sink is there:
+		// only the sink's own mode refuses. The live object is that file, and a
+		// clause naming the directory would prescribe a chmod that changes
+		// nothing — while asserting an absence the file sitting there denies.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-sinkmode-"));
+		const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
+		try {
+			writeFileSync(sinkPath, "");
+			chmodSync(sinkPath, 0o000);
+			const { value, warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			assert.equal(value, false, "the arm measures nothing unless the sink's own mode refuses the append");
+			const clause = recoveryClause(warnings[0] ?? "");
+			const named = clause === undefined ? undefined : pathNamedIn(clause);
+			if (named !== undefined) {
+				assertInsideFixture(named, stateRoot);
+			}
+			const performed =
+				named === undefined
+					? "no path named"
+					: perform(`made ${named} writable by this account`, () => chmodSync(named, 0o600));
+			assert.equal(
+				captureWarnings(() => appendAuditRecord(stateRoot, INPUT)).value,
+				true,
+				`the signal names a recovery that is dead where it is emitted. signal: ${JSON.stringify(warnings[0])}; recovery clause: ${JSON.stringify(clause)}; performing it: ${performed}`,
+			);
+		} finally {
+			perform("restored the fixture modes", () => {
+				chmodSync(stateRoot, 0o700);
+				chmodSync(sinkPath, 0o600);
+			});
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("routes the delayed-write shapes away from the sink-path recovery (§3.11)", () => {
+		// ENOSPC, EDQUOT, EROFS and EIO reach the selector from the close as
+		// well as from the open — a write the filesystem accepted and then
+		// refused. None is stageable on a test host: no filesystem is filled, no
+		// mount is remounted, no device is broken (§3.12), so the routing is
+		// measured by calling the selector rather than by provoking the failure.
+		// The comparison object is the general arm's own output, taken from a
+		// code it is the arm for; matching it means the operator is told to make
+		// the sink a plain writable file, which for all four it already is.
+		const stateRoot = join(tmpdir(), "ghjig-audit-delayed-write");
+		const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
+		const general = recoveryFor({ code: "ENOTAROUTEDCODE" }, stateRoot, sinkPath);
+		for (const code of ["ENOSPC", "EDQUOT", "EROFS", "EIO"]) {
+			assert.notEqual(
+				recoveryFor({ code }, stateRoot, sinkPath),
+				general,
+				`${code} falls to the general recovery, which prescribes making ${sinkPath} a plain file writable by this account — for this failure it already is one, so the clause names an act that changes nothing: ${general}`,
+			);
+		}
+	});
+
+	it("gives each delayed-write object its own recovery, not one shared clause (§3.11)", () => {
+		// Distinctness from the general arm is not enough: four codes can all
+		// miss the general clause and still share ONE clause between them, and
+		// then a read-only mount and a failed device are both told to free disk
+		// space. The comparison is GROUP-wise, one object per group — pairwise
+		// across the four codes would red on ENOSPC and EDQUOT, which name the
+		// same object (room for the record) and are right to share a clause.
+		// Clauses are compared to each other, never to expected text, so the
+		// arm pins the routing and not the wording.
+		const stateRoot = join(tmpdir(), "ghjig-audit-delayed-write");
+		const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
+		const groups = [
+			{ object: "room for the record on the filesystem", codes: ["ENOSPC", "EDQUOT"] },
+			{ object: "the mount, which refuses every write while it holds", codes: ["EROFS"] },
+			{ object: "the device or transport under the filesystem", codes: ["EIO"] },
+		];
+		for (const [index, group] of groups.entries()) {
+			for (const other of groups.slice(index + 1)) {
+				for (const code of group.codes) {
+					for (const otherCode of other.codes) {
+						assert.notEqual(
+							recoveryFor({ code }, stateRoot, sinkPath),
+							recoveryFor({ code: otherCode }, stateRoot, sinkPath),
+							`${code} and ${otherCode} select the same recovery, but the object to repair differs — ${group.object} versus ${other.object} — so one of the two is being told to act on something that did not fail: ${recoveryFor({ code }, stateRoot, sinkPath)}`,
+						);
+					}
+				}
+			}
+		}
+	});
+});
+
+describe("audit primitive: the record write is all-or-raise (§3.12)", () => {
+	/** Bytes sitting at the destination, read off a non-blocking descriptor. */
+	function drainedBytes(fd: number): number {
+		const buffer = Buffer.allocUnsafe(65536);
+		let total = 0;
+		for (;;) {
+			let read: number;
+			try {
+				read = readSync(fd, buffer, 0, buffer.length, null);
+			} catch (error) {
+				// Nothing left to read on a descriptor whose writer is still open.
+				if ((error as { code?: string }).code === "EAGAIN") {
+					return total;
+				}
+				throw error;
+			}
+			if (read === 0) {
+				return total;
+			}
+			total += read;
+		}
+	}
+
+	it("never returns having written only part of the record", {
+		skip: process.platform === "win32" ? "POSIX FIFO" : false,
+	}, () => {
+		// The property is "cannot return without writing everything". Through
+		// appendAuditRecord it is unstageable — that descriptor is always
+		// blocking, and no test host fills a filesystem mid-write (§3.12) — so
+		// it is measured at the seam the append calls, on a NON-BLOCKING
+		// descriptor, where a short write is one call away. One `write(2)` in
+		// place of the fd form returns the short count as a success; the fd
+		// form raises instead, and that raise is the whole difference.
+		//
+		// Nothing here can park: both ends are opened O_NONBLOCK, the reader
+		// end first because a write-only open on a FIFO with no reader fails
+		// ENXIO, and no arm ever waits on the pipe.
+		const dir = mkdtempSync(join(tmpdir(), "ghjig-audit-writeall-"));
+		const fifo = join(dir, "sink.fifo");
+		execFileSync("mkfifo", [fifo]);
+		const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
+		const writer = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+		try {
+			// One byte past Linux's default `pipe-max-size`, the largest buffer a
+			// host is ordinarily configured with, so the write cannot complete in
+			// one call and a short write is reachable.
+			//
+			// Reach: on a host whose pipe buffer is 1 MiB or larger the payload
+			// goes in whole, no short write occurs, and the arm measures nothing —
+			// both assertions are implications: the second holds vacuously,
+			// its antecedent being false, while the first holds by its
+			// consequent. Neither discriminates, so the `writeSync` mutant
+			// survives and the arm passes without having measured anything;
+			// raising the payload would only move the same limit to a larger
+			// number.
+			const line = `${"x".repeat(1024 * 1024)}\n`;
+			const size = Buffer.byteLength(line);
+			let returned = false;
+			try {
+				writeRecordLine(writer, line);
+				returned = true;
+			} catch {
+				// The raise is the reported failure; what landed is measured below.
+			}
+			const landed = drainedBytes(reader);
+			assert.ok(
+				!returned || landed === size,
+				`the write returned normally with ${landed} of ${size} bytes at the destination: the caller is told the record was written when only a prefix of it was, and the append folds that partial line into a trail it reports as clean`,
+			);
+			// The residual the module enumerates: a failed write is not a
+			// no-op — a prefix is at rest at the destination — so what the
+			// raise removes is the false success, never the torn record.
+			assert.ok(
+				returned || (landed > 0 && landed < size),
+				`the raise left ${landed} of ${size} bytes at the destination, so the torn-record residual the module enumerates does not describe what happens here`,
+			);
+		} finally {
+			closeSync(writer);
+			closeSync(reader);
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("state-root resolution matrix (§5.5, §4.6)", () => {
 	it("computes the operational path under the repo root when no seam is set", () => {
 		const resolved = resolveStateRoot();
@@ -200,6 +828,49 @@ describe("state-root resolution matrix (§5.5, §4.6)", () => {
 			assert.throws(() => resolveStateRoot());
 		} finally {
 			rmSync(seamDir, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a seam target this account cannot measure instead of falling back (§3.9)", {
+		// POSIX permission bits, and an account the mode actually binds: for a
+		// superuser the ancestor refuses nothing, the target measures as the
+		// directory it is, and the arm would report a refusal that never
+		// occurred.
+		skip:
+			process.platform === "win32"
+				? "POSIX permission bits"
+				: process.getuid?.() === 0
+					? "the directory mode refuses nothing for this account"
+					: false,
+	}, () => {
+		// The `seam-target` posture row names REFUSED alongside missing and
+		// not-a-directory, and refused is the one shape whose target IS a
+		// directory: only the probe is denied. Left unstaged the row asserts a
+		// behaviour nothing measures, so a resolution that treated an
+		// unmeasurable target as absent-and-fall-back — or that let the raw
+		// EACCES escape factory scope without this module's recovery — would
+		// keep the row green. The refusal is staged where §3.12 allows it to
+		// be: an unsearchable ancestor, the same device the audit side uses.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-seam-refused-"));
+		const blocked = join(base, "blocked");
+		mkdirSync(blocked);
+		const target = join(blocked, "state");
+		mkdirSync(target);
+		try {
+			chmodSync(blocked, 0o000);
+			assert.throws(
+				() => statSync(target),
+				"the arm measures nothing unless the unsearchable ancestor refuses the probe on the seam target",
+			);
+			process.env[SEAM] = target;
+			assert.throws(
+				() => resolveStateRoot(),
+				/is set but unusable/,
+				"a seam target this account cannot measure must refuse with the seam's own message, not fall back to the operational state root and not escape as a raw filesystem error",
+			);
+		} finally {
+			chmodSync(blocked, 0o700);
+			rmSync(base, { recursive: true, force: true });
 		}
 	});
 
@@ -299,6 +970,34 @@ describe("locate: candidate admissibility bound (§4.7)", () => {
 		}
 	});
 
+	it("rejects a .pi/ below the install root whose directory name begins with the traversal token", () => {
+		// `..z` is an ordinary directory name that merely shares a prefix with
+		// `..`. Below the install root it is the same subproject candidate the
+		// bound rejects under any other name, and adopting it relocates the
+		// evidence sink into the install tree — the outcome the bound exists to
+		// prevent (§4.7), reached through the prefix collision §4.6 forbids
+		// from mis-scoping in either direction.
+		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
+		try {
+			mkdirSync(join(root, ".pi"));
+			const below = join(root, "..z");
+			mkdirSync(join(below, ".pi"), { recursive: true });
+			// Three levels below <root>, so the structural root is <root> and
+			// `<root>/..z` sits strictly inside it.
+			const installDir = join(below, "nested", "install");
+			mkdirSync(installDir, { recursive: true });
+			const moduleFile = join(installDir, "locate.ts");
+			writeFileSync(moduleFile, "// stand-in for the installed module\n");
+			assert.equal(
+				captureWarnings(() => locateRepoRootFrom(moduleFile)).value,
+				root,
+				"a .pi/ below the install root must never be adopted as the repo root, whatever its directory is named",
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("still accepts a .pi/ ancestor above the install root (upper bound unmoved)", () => {
 		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
 		try {
@@ -326,6 +1025,75 @@ describe("locate: candidate admissibility bound (§4.7)", () => {
 			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
 			assert.match(warnings[0], /repo-root discovery failed/);
 		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("locate: every entry resolves without the working directory (§4.6)", () => {
+	/** The outcome of one resolution, compared across working directories. */
+	type Outcome = { root: string } | { refused: true };
+
+	function resolveFrom(cwd: string, moduleFile: string): Outcome {
+		const originalCwd = process.cwd();
+		process.chdir(cwd);
+		try {
+			return { root: captureWarnings(() => locateRepoRootFrom(moduleFile)).value };
+		} catch {
+			// A refusal is a legitimate answer to an argument the module cannot
+			// anchor; what it must not be is a different answer per directory.
+			return { refused: true };
+		} finally {
+			process.chdir(originalCwd);
+		}
+	}
+
+	it("answers one argument identically from every working directory", () => {
+		// The module states it never consults the process working directory. A
+		// relative `moduleFile` is the entry where that can break: whatever the
+		// resolution makes of such an argument, it must make the same of it
+		// wherever the process happens to stand.
+		const root = mkdtempSync(join(tmpdir(), "ghjig-cwd-"));
+		try {
+			const installDir = join(root, "x", "nested", "install");
+			mkdirSync(installDir, { recursive: true });
+			mkdirSync(join(root, "x", ".pi"), { recursive: true });
+			writeFileSync(join(installDir, "locate.ts"), "// stand-in for the installed module\n");
+			assert.deepEqual(
+				resolveFrom(installDir, "locate.ts"),
+				resolveFrom(join(root, "x"), "locate.ts"),
+				"the same module argument resolved to different repository roots from two working directories",
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("locate: probes answer rather than throw (§3.9 repo-root-discovery)", () => {
+	it("returns a root when the filesystem refuses a probe on the walk", () => {
+		// `repo-root-discovery` is an open posture and the resolution runs
+		// inside the extension factory, so a throw here does not degrade the
+		// walk — it aborts extension load, the fail-closed outcome that row
+		// denies.
+		//
+		// Reach: this arm stages the refusal POSIX permissions can stage. It
+		// measures nothing on a host that grants access regardless of mode (a
+		// root container, or a filesystem without permission bits), and it
+		// cannot stage a refusal that arrives BETWEEN two probes of the same
+		// path — that one is a race, not a state a check can construct.
+		const root = mkdtempSync(join(tmpdir(), "ghjig-refuse-"));
+		const blocked = join(root, "blocked");
+		const installDir = join(blocked, "nested", "install");
+		mkdirSync(installDir, { recursive: true });
+		mkdirSync(join(blocked, ".pi"));
+		chmodSync(blocked, 0o000);
+		try {
+			assert.doesNotThrow(() =>
+				captureWarnings(() => locateRepoRootFrom(join(installDir, "locate.ts"))),
+			);
+		} finally {
+			chmodSync(blocked, 0o755);
 			rmSync(root, { recursive: true, force: true });
 		}
 	});
