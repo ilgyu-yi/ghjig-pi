@@ -24,10 +24,11 @@
  *     failure class (§3.2; §3.9 refuse-not-approve);
  *   - D2 tree isolation: `git status --porcelain` identical before/after,
  *     and the operational state root `<repo>/.ghjig/state/` in the same
- *     state after the suite as before it — same absence, or the same entry
- *     list, so a suite appending into a root that already existed is caught
- *     too, which `/.ghjig/` being git-ignored keeps out of the porcelain
- *     arm (§5.5 — the seam, never the operational sink). The
+ *     state after the suite as before it — same absence, or the same
+ *     entries at the same sizes, so a suite appending into a trail that
+ *     already existed is caught too and not only one adding a file, which
+ *     `/.ghjig/` being git-ignored keeps out of the porcelain arm (§5.5 —
+ *     the seam, never the operational sink). The
  *     assertion targets `.ghjig/state/` rather than all of `.ghjig/` because
  *     `.ghjig/` legitimately holds per-clone untracked binding state in a
  *     working clone (§4.1); the runtime's own sink is what must stay
@@ -38,7 +39,7 @@
  *     just as well on a run that was never polluted.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -52,6 +53,7 @@ import {
 	gitPorcelain,
 	isLoadTimeActionFailure,
 	listTreeEntries,
+	listTreeSizes,
 	type PiRunResult,
 	readAuditLines,
 	readSessionEntries,
@@ -66,12 +68,19 @@ const DECOY_VARS = ["GHJIG_ROOT", "GHJIG_STATE_ROOT", "GHJIG_PI_ROOT", "PI_STATE
 
 /**
  * The operational state root as a snapshot: `undefined` when it is absent,
- * otherwise its full entry list. Existence alone would not catch a suite
- * that writes INTO a root an operational writer had already created, and
- * `/.ghjig/` is git-ignored, so the porcelain arm does not catch it either.
+ * otherwise every entry under it WITH ITS SIZE. Existence alone would not
+ * catch a suite that writes INTO a root an operational writer had already
+ * created, and `/.ghjig/` is git-ignored, so the porcelain arm does not
+ * catch it either. Names alone would not either: the shape this arm is
+ * most owed is a suite appending a line to a trail that was already there,
+ * and an append changes no name. The size is what makes that visible.
  */
+function snapshotOf(dir: string): string[] | undefined {
+	return existsSync(dir) ? listTreeSizes(dir) : undefined;
+}
+
 function operationalSnapshot(): string[] | undefined {
-	return existsSync(OPERATIONAL_STATE_ROOT) ? listTreeEntries(OPERATIONAL_STATE_ROOT) : undefined;
+	return snapshotOf(OPERATIONAL_STATE_ROOT);
 }
 
 const SCRIPT: ScriptTurn[] = [
@@ -433,15 +442,42 @@ describe("AC2/D2: repository-tree isolation snapshot", () => {
 		// an absolute absence the arm would also fail on a clone where an
 		// operational writer had legitimately created the root, and would stop
 		// measuring the suite the moment such a writer exists. Stated as mere
-		// existence it would miss the shape it is most owed — a suite appending
-		// into a root that was already there — which `/.ghjig/` being
-		// git-ignored keeps out of the porcelain arm below as well. So the
-		// comparison is the entry list, and absence is one of its values.
+		// existence — or as the entry NAMES alone, which an append leaves
+		// untouched — it would miss the shape it is most owed: a suite
+		// appending into a trail that was already there, which `/.ghjig/`
+		// being git-ignored keeps out of the porcelain arm below as well. So
+		// the comparison is each entry with its size, and absence is one of
+		// its values.
 		assert.deepEqual(
 			operationalSnapshot(),
 			operationalBefore,
 			`${OPERATIONAL_STATE_ROOT} changed across the suite: a test run must resolve state to a disposable root and never touch the operational sink`,
 		);
+	});
+
+	it("takes a snapshot an append into an existing entry moves (§5.5)", () => {
+		// The arm above compares a root that is ABSENT in this tree, so it
+		// reads `undefined === undefined` and would say the same whether the
+		// snapshot carried sizes or only names. What it is most owed is the
+		// append — a line added to a trail an operational writer had already
+		// created, which changes no entry name — and that is a property of
+		// `snapshotOf`, not of today's disk. Measured here on a disposable
+		// root, because staging it at the operational root would be the very
+		// write this block forbids.
+		const probe = mkdtempSync(join(tmpdir(), "ghjig-d2-mechanism-"));
+		try {
+			const sink = join(probe, AUDIT_FILE_NAME);
+			writeFileSync(sink, `${JSON.stringify({ pre: "existing" })}\n`);
+			const before = snapshotOf(probe);
+			appendFileSync(sink, `${JSON.stringify({ leaked: "by the suite" })}\n`);
+			assert.notDeepEqual(
+				snapshotOf(probe),
+				before,
+				`an append into an entry that was already there left the snapshot identical (${JSON.stringify(before)}): the arm above would report a clean operational root on a clone where a writer had created one`,
+			);
+		} finally {
+			rmSync(probe, { recursive: true, force: true });
+		}
 	});
 
 	it("leaves git status --porcelain byte-identical to the pre-suite snapshot", () => {

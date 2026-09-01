@@ -15,7 +15,11 @@
  *                   repair, never one clause shared across objects that
  *                   owe different acts (§3.11). The write itself never
  *                   returns having landed only part of a record, measured
- *                   at the seam the append calls (§3.12).
+ *                   at the seam the append calls (§3.12). A state root
+ *                   that is not absolute is refused rather than resolved
+ *                   against the process working directory, which would
+ *                   put the trail outside the repository it is about and
+ *                   report success (§4.6, §5.5).
  *   - state-root.ts — resolution matrix: no seam → operational path
  *                   computed, nothing created; seam → override with
  *                   `seamActive: true`; malformed/unusable seam → refusal,
@@ -31,6 +35,11 @@
  *   - postures.ts — the §3.9 fail-posture inventory: exactly the three
  *                   shipped dependencies, each with a posture, and every
  *                   fail-closed row with an in-place justification.
+ *
+ * One arm measures this suite rather than the runtime: the containment
+ * guard the recovery arms perform behind is itself asserted, because a
+ * guard nothing measures is decoration (§3.12) and this one is what
+ * stands between a mutated clause and an act on the host.
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -44,13 +53,14 @@ import {
 	openSync,
 	readFileSync,
 	readSync,
+	realpathSync,
 	rmSync,
 	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 // The sink's name comes from the runtime itself: an arm that plants a symlink
@@ -173,6 +183,28 @@ describe("audit primitive: one-line encoded records (§5.5)", () => {
 describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", () => {
 	const INPUT = { category: "test", action: "sink", text: "evidence" };
 
+	/**
+	 * The clause reader below delimits a path at whitespace, so on a host
+	 * whose temporary directory carries whitespace it reads a TRUNCATED
+	 * path — and the arms that perform what a clause names then either act
+	 * on something the fixture does not own or refuse a clause production
+	 * emitted correctly. Both are results about the host, not about the
+	 * code under test (§3.12), so those arms measure nothing here and say
+	 * so rather than reporting a red the clause did not earn.
+	 *
+	 * Widening the reader is not the fix available: the whitespace IS the
+	 * only signal saying where the path production named ends, and ending
+	 * it instead at whatever happens to exist on disk would repair the
+	 * clause toward what the arm hoped to read — the one move these arms
+	 * exist to refuse. Delimiting the path in the production message would
+	 * fix it at the source, for the operator pasting it into a shell as
+	 * much as for this reader; that is a change to operator-facing text
+	 * and is not made here.
+	 */
+	const CLAUSE_PATH_UNREADABLE: string | false = /\s/.test(tmpdir())
+		? "the fixture base path carries whitespace, which the recovery-clause reader cannot delimit"
+		: false;
+
 	/** The recovery clause of a degradation signal, if the signal carries one. */
 	function recoveryClause(warning: string): string | undefined {
 		return /Recovery:\s*(.+)$/s.exec(warning)?.[1];
@@ -205,6 +237,35 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	}
 
 	/**
+	 * The physical form of a path whose tail need not exist: every component
+	 * that is on disk resolved through its links, with the remainder
+	 * appended as written. `realpathSync` alone cannot answer for the paths
+	 * these arms handle — the destination a clause names is often exactly
+	 * what is missing, since creating it is the act — so the walk stops at
+	 * the deepest ancestor that resolves. That is enough for containment:
+	 * a link can only redirect a component that exists.
+	 */
+	function physicalPath(path: string): string {
+		let existing = resolve(path);
+		const tail: string[] = [];
+		for (;;) {
+			try {
+				const resolved = realpathSync(existing);
+				return tail.length === 0 ? resolved : join(resolved, ...tail);
+			} catch {
+				const parent = dirname(existing);
+				if (parent === existing) {
+					// Not reachable from an absolute path, whose root always
+					// resolves; textual normalisation is all that is left.
+					return resolve(path);
+				}
+				tail.unshift(basename(existing));
+				existing = parent;
+			}
+		}
+	}
+
+	/**
 	 * Refuses to perform a clause that names a path the fixture does not own.
 	 *
 	 * The arms below carry out the act their clause prescribes — a recursive
@@ -219,13 +280,19 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	 * their live object; anything above or beside it is not.
 	 */
 	function assertInsideFixture(named: string, fixture: string): void {
-		// Resolved, not textual: `<fixture>/../../victim` satisfies a bare
-		// prefix test. Unreachable through today's `recoveryFor`, whose paths
-		// all pass through `join`/`dirname`, but the guard exists because a
-		// mutant may make the clause name anything — so it must not rest on a
-		// property of the function it is guarding against.
-		const here = resolve(named);
-		const root = resolve(fixture);
+		// Physical, not textual: `resolve()` alone normalises `<fixture>/../
+		// ../victim`, which a bare prefix test admits, but it does not follow
+		// links — and §4.6 asks this comparison for RESOLVED PHYSICAL paths
+		// precisely because a symlinked component inside the fixture puts the
+		// performed act outside it while the textual form still reads as
+		// contained. Neither escape is reachable through today's
+		// `recoveryFor`, whose paths all pass through `join`/`dirname`, and no
+		// fixture here holds a link; the guard resolves both operands anyway,
+		// because a containment check that rests on a property of the fixture
+		// is the same defect as one resting on a property of the function it
+		// is guarding against, one level down.
+		const here = physicalPath(named);
+		const root = physicalPath(fixture);
 		assert.ok(
 			here === root || here.startsWith(root + sep),
 			`the recovery clause names ${named}, which the fixture at ${fixture} does not own. This arm PERFORMS what the clause names, so it refuses to act rather than reach outside the fixture — the selection that produced this path is what the arm exists to measure, and a guard that destroys evidence when it fires is the wrong shape`,
@@ -241,6 +308,72 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 			return `${description} — could not be performed: ${String(error)}`;
 		}
 	}
+
+	it("refuses a clause path that leaves the fixture through a symlinked component (§4.6)", () => {
+		// The containment guard is the only thing between a mutated clause and
+		// an act on the host, and a guard this suite never measures is
+		// decoration (§3.12). Textual containment admits a path through a link
+		// inside the fixture: the arm below stages one and asserts the guard
+		// refuses it, then asserts it still admits an ordinary path the
+		// fixture does own — a guard that refuses everything contains nothing.
+		const fixture = mkdtempSync(join(tmpdir(), "ghjig-guard-fixture-"));
+		const outside = mkdtempSync(join(tmpdir(), "ghjig-guard-outside-"));
+		try {
+			const precious = join(outside, "precious");
+			writeFileSync(precious, "a file no arm of this suite may reach");
+			symlinkSync(outside, join(fixture, "link"));
+			const escape = join(fixture, "link", "precious");
+			assert.throws(
+				() => assertInsideFixture(escape, fixture),
+				/does not own/,
+				`the guard admits ${escape}, which really resolves to ${precious}: an arm performing what a clause names would delete or chmod outside the fixture it is contained to, and the fixture holding no link is not a property the guard may rest on`,
+			);
+			assert.doesNotThrow(
+				() => assertInsideFixture(join(fixture, "no-such-dir", "deeper"), fixture),
+				"the guard refuses a path the fixture does own — a guard that refuses everything contains nothing, and the destinations these arms create do not exist yet",
+			);
+		} finally {
+			rmSync(fixture, { recursive: true, force: true });
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a state root that is not absolute rather than writing the trail beside the process (§4.6, §5.5)", () => {
+		// A relative or empty root has no anchor but the process working
+		// directory, so the sink would land wherever the process happens to
+		// stand — outside the repository whose work it records — and the
+		// append would report success. Unreachable through `resolveStateRoot`,
+		// which refuses an empty or relative seam; the refusal is measured
+		// here because that reach argument is a property of today's only
+		// caller, and the mirror-image precondition on `locateRepoRootFrom`
+		// was closed on exactly this reasoning.
+		const elsewhere = mkdtempSync(join(tmpdir(), "ghjig-audit-cwd-"));
+		const savedCwd = process.cwd();
+		try {
+			process.chdir(elsewhere);
+			for (const root of ["", "state", join("..", "state")]) {
+				const { value, warnings } = captureWarnings(() => appendAuditRecord(root, INPUT));
+				assert.equal(value, false, `a state root of ${JSON.stringify(root)} was accepted`);
+				assert.equal(
+					warnings.length,
+					1,
+					`expected one degradation signal for ${JSON.stringify(root)}, got ${JSON.stringify(warnings)}`,
+				);
+				assert.ok(
+					recoveryClause(warnings[0] ?? "") !== undefined,
+					`the refusal states no way to restore the trail: ${JSON.stringify(warnings)}`,
+				);
+			}
+			assert.equal(
+				existsSync(join(elsewhere, AUDIT_FILE_NAME)),
+				false,
+				"the audit trail was written into the process working directory: evidence about one repository came to rest wherever the process stood",
+			);
+		} finally {
+			process.chdir(savedCwd);
+			rmSync(elsewhere, { recursive: true, force: true });
+		}
+	});
 
 	it("leaves a symlink's target untouched: the record lands at the audit path itself (§4.6)", () => {
 		// Write-target equals read-target: a link planted at the sink path must
@@ -303,7 +436,9 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		}
 	});
 
-	it("names a recovery that is live at this surface: performing it restores the trail (§3.11)", () => {
+	it("names a recovery that is live at this surface: performing it restores the trail (§3.11)", {
+		skip: CLAUSE_PATH_UNREADABLE,
+	}, () => {
 		// Asserted by running the recovery, not by matching its prose: the arm
 		// creates the destination the signal names and appends again. A signal
 		// naming a recovery that does not restore the trail is worse than one
@@ -315,6 +450,12 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 			const clause = recoveryClause(warnings[0] ?? "");
 			const destination = clause === undefined ? undefined : destinationNamedIn(clause);
 			if (destination !== undefined) {
+				// This arm CREATES what the clause names, so it is contained
+				// like the three that delete and chmod: `mkdir -p` at a
+				// clause-chosen path reaches as far outside the fixture as the
+				// clause does, and this was the one performing arm without the
+				// guard.
+				assertInsideFixture(destination, stateRoot);
 				mkdirSync(destination, { recursive: true });
 			}
 			const restored = captureWarnings(() => appendAuditRecord(missing, INPUT)).value;
@@ -328,7 +469,9 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		}
 	});
 
-	it("names a live recovery when an ancestor of the destination is a plain file (§3.11)", () => {
+	it("names a live recovery when an ancestor of the destination is a plain file (§3.11)", {
+		skip: CLAUSE_PATH_UNREADABLE,
+	}, () => {
 		// `<repo>/.ghjig` existing as a file is an honest mistake, not a hostile
 		// one, so this arm is owed a live recovery. Nothing can be created
 		// beneath a plain file, so a clause naming the sink path prescribes an
@@ -368,11 +511,12 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// superuser the directory refuses nothing, so the arm would measure the
 		// message against a failure that never occurred.
 		skip:
-			process.platform === "win32"
+			CLAUSE_PATH_UNREADABLE ||
+			(process.platform === "win32"
 				? "POSIX permission bits"
 				: process.getuid?.() === 0
 					? "the directory mode refuses nothing for this account"
-					: false,
+					: false),
 	}, () => {
 		// `.ghjig/state` created with restrictive permissions is an honest
 		// mistake. The sink does not exist and cannot be created, so a clause
@@ -406,12 +550,17 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	});
 
 	it("keeps the destination-mode recovery off the unsearchable-ancestor shape (§3.11)", {
+		// The whitespace condition is disqualifying here for the opposite
+		// reason to the performing arms: a truncated parse makes this arm's
+		// `notEqual` pass on any clause at all, so it would report a green it
+		// did not measure.
 		skip:
-			process.platform === "win32"
+			CLAUSE_PATH_UNREADABLE ||
+			(process.platform === "win32"
 				? "POSIX permission bits"
 				: process.getuid?.() === 0
 					? "the directory mode refuses nothing for this account"
-					: false,
+					: false),
 	}, () => {
 		// An ANCESTOR of the destination refuses the search, so the destination
 		// cannot be measured at all — and its own mode already admits this
@@ -442,11 +591,12 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 
 	it("names a live recovery when the sink's own mode refuses the append (§3.11)", {
 		skip:
-			process.platform === "win32"
+			CLAUSE_PATH_UNREADABLE ||
+			(process.platform === "win32"
 				? "POSIX permission bits"
 				: process.getuid?.() === 0
 					? "the sink mode refuses nothing for this account"
-					: false,
+					: false),
 	}, () => {
 		// The destination directory admits this account and the sink is there:
 		// only the sink's own mode refuses. The live object is that file, and a

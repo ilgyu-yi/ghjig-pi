@@ -9,16 +9,24 @@
  * The sink is opened rather than appended to by name, on two counts §4.6
  * and §5.5 make binding:
  *
- *   - `O_NOFOLLOW` — write-target equals read-target (§4.6). A symlink
- *     planted at the sink path would send every record somewhere the
- *     consuming gate never reads, and both sides would report clean: the
- *     write succeeds, the read finds nothing. The open refuses the link
- *     instead of following it, and the refusal degrades open like any
- *     other unwritable destination.
+ *   - `O_NOFOLLOW` — the evidence comes to rest at the path the gate
+ *     reads, and in the file that path names (§4.6). What a symlink
+ *     planted at the sink path buys its planter is not a write/read
+ *     divergence: a consumer reading the sink BY NAME follows the same
+ *     link to the same bytes, so both sides do agree. What it buys is
+ *     the record itself — every line lands in a file the planter chose
+ *     and can read, and can rewrite before any consumer reads it. The
+ *     open refuses the link instead of following it, and the refusal
+ *     degrades open like any other unwritable destination.
  *   - mode `0600` — the record at rest is readable only by the account
- *     that writes it (§5.5). Passed on the create so the bits do not
- *     depend on the ambient umask; the sink is a file only this runtime
- *     writes, so no legitimate flow is refused (§3.6 obligation (i)).
+ *     that writes it (§5.5). Passed on the create, which makes `0600` a
+ *     CEILING rather than a mode independent of the ambient umask: a
+ *     umask only removes bits, so the sink is never looser than `0600`
+ *     and may be tighter (measured: `umask 077` and `umask 022` both
+ *     land `600`; `umask 777` lands `000`, which the next append then
+ *     degrades open on). The direction that matters for §5.5 is the one
+ *     the ceiling binds. The sink is a file only this runtime writes, so
+ *     no legitimate flow is refused (§3.6 obligation (i)).
  *
  * Fail posture (§3.9, `audit-append` row): a missing or unwritable
  * destination degrades OPEN — warn, return `false`, never throw. The
@@ -29,6 +37,29 @@
  * the destination directory: state-root creation belongs to the first
  * operational writer, not to observability (§3.8 — additive
  * observability never moves a fail direction).
+ *
+ * `stateRoot` must be ABSOLUTE, and a root that is not is refused the
+ * same way any other unusable destination is — warn, return `false`,
+ * never throw. A relative or empty root is resolved against the process
+ * working directory, which §4.6 keeps off the hot path, and would put
+ * the trail wherever the process happens to stand rather than inside
+ * the repository whose work it records (§5.5). `resolveStateRoot`
+ * already refuses an empty or relative seam, so nothing shipped reaches
+ * this arm; it is here because the mirror-image precondition on
+ * `locateRepoRootFrom` was closed on exactly this reasoning, and a sink
+ * that writes evidence to an ambient location is the harsher half of
+ * the pair. It refuses by degrading rather than by throwing, as
+ * `locateRepoRootFrom` does, because the `audit-append` row is open
+ * where `repo-root-discovery` is not.
+ *
+ * One shape defeats the open posture and is NOT closed here: a FIFO at
+ * the sink path. `O_NOFOLLOW` refuses a symlink, not a named pipe, and
+ * `openSync` on a FIFO with no reader blocks indefinitely — the append
+ * neither returns nor throws, so the extension factory hangs where this
+ * row promises a warning and a `false`. Measured identical before and
+ * after this primitive stopped using `appendFileSync`, so it is neither
+ * introduced nor widened here. Enumerated in place rather than left to
+ * the ticket alone (§3.11); tracked as #44.
  *
  * The record is written through `writeRecordLine` — the fd form of
  * `writeFileSync`, never `writeSync`. `writeSync` is one `write(2)`: it
@@ -78,7 +109,7 @@
  * a second failure on an already-reported append has nothing to add.
  */
 import { closeSync, constants, existsSync, lstatSync, openSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 
 /** The audit file name the runtime and its consumers agree on (§5.5). */
 export const AUDIT_FILE_NAME = "audit.jsonl";
@@ -252,6 +283,22 @@ export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string)
 	);
 }
 
+/**
+ * The one degradation signal this primitive emits (§3.9, §3.11). Both
+ * the precondition refusal and the failed append reach the operator in
+ * the same shape — consequence in plain words, then cause, then the act
+ * that restores the trail — because a reader who has learned to read one
+ * of them has learned to read the other.
+ */
+function warnDegraded(cause: string, recovery: string): void {
+	console.warn(
+		`[ghjig] audit append failed: no audit evidence is being recorded for this run — ` +
+			`the audit trail is NOT ENFORCED. Degrading open rather than blocking (§3.9). ` +
+			`Cause: ${cause}. ` +
+			`Recovery: ${recovery}`,
+	);
+}
+
 export interface AuditInput {
 	category: string;
 	action: string;
@@ -260,6 +307,20 @@ export interface AuditInput {
 }
 
 export function appendAuditRecord(stateRoot: string, input: AuditInput): boolean {
+	// Before anything is opened: a root that is not absolute has no anchor
+	// but the process working directory, and resolving against it would
+	// write the trail outside the repository the trail is about — and
+	// report success (§4.6, §5.5). The refusal is a degradation, not a
+	// throw, because this row is open (see the header).
+	if (!isAbsolute(stateRoot)) {
+		warnDegraded(
+			`the state root ${JSON.stringify(stateRoot)} is not an absolute path, so the sink under it would ` +
+				`resolve against whatever directory this process happens to stand in`,
+			`call this primitive with the absolute state root \`resolveStateRoot\` returns — the trail belongs ` +
+				`inside the repository whose work it records, and an ambient working directory is not one.`,
+		);
+		return false;
+	}
 	const record = {
 		timestamp: new Date().toISOString(),
 		category: input.category,
@@ -281,12 +342,7 @@ export function appendAuditRecord(stateRoot: string, input: AuditInput): boolean
 		return true;
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
-		console.warn(
-			`[ghjig] audit append failed: no audit evidence is being recorded for this run — ` +
-				`the audit trail is NOT ENFORCED. Degrading open rather than blocking (§3.9). ` +
-				`Cause: ${reason}. ` +
-				`Recovery: ${recoveryFor(error, stateRoot, sinkPath)}`,
-		);
+		warnDegraded(reason, recoveryFor(error, stateRoot, sinkPath));
 		return false;
 	} finally {
 		if (leaked !== undefined) {
