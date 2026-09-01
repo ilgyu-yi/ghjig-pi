@@ -65,14 +65,12 @@ jobs:
           # output, or with none, is a failure the caller has to see. Each
           # call site therefore names a validity predicate, and an attempt
           # whose output fails it is retried like any other failure.
-          # Each predicate carries three clauses, and dropping any one of them
-          # admits a shape measured to reach a wrong verdict. `-s` slurps the
-          # response into an array of documents, so `length == 1` is what
-          # rejects a CONCATENATED pair — `jq -e 'type == "object"'` over a
-          # two-document stream exits 0, and the second document's `.number`
-          # then widens the allow-set. The type clause rejects a zero-exit body
-          # of the wrong shape, and the emptiness clause rejects one that
-          # parses and carries nothing.
+          # Both predicates share two clauses. `-s` slurps the response into an
+          # array of documents, so `length == 1` is what rejects a CONCATENATED
+          # pair — `jq -e 'type == "object"'` over a two-document stream exits
+          # 0, and the second document's `.number` then widens the allow-set.
+          # The type clause rejects a zero-exit body of the wrong shape. Each
+          # predicate's own comment states what else it does or does not check.
           nonempty_object() {
             [ -n "$1" ] || return 1
             printf '%s' "$1" \
@@ -80,15 +78,17 @@ jobs:
                 >/dev/null 2>&1
           }
 
-          # The listing is the paginated shape `--slurp` produces: an array of
-          # pages. Emptiness is deliberately NOT tested here. `[[]]` is what the
+          # The listing is the paginated shape `--slurp` produces: ONE document
+          # holding an array of pages, so a multi-page response is expected and
+          # admitted; what this rejects is a second document. Emptiness is
+          # deliberately NOT tested here. `[[]]` is what the
           # platform returns for a collection with no members, so a pull request
           # whose net diff is empty produces it legitimately — refusing it at the
           # fetch spends three retries and then names re-running, which cannot
           # clear it. The script decides emptiness instead: it cross-checks the
           # entry count against the PR's own changedFiles, and its floor refusal
           # names the recovery that is live for an empty listing.
-          single_page_array() {
+          single_document_array() {
             [ -n "$1" ] || return 1
             printf '%s' "$1" \
               | jq -e -s 'length == 1 and (.[0] | type == "array")' \
@@ -126,7 +126,7 @@ jobs:
           # file touched and then reverted, and reports a path that is no
           # longer in the checkout. `--slurp` is rejected together with `--jq`
           # by gh, so the shaping happens in a separate jq below.
-          files_json=$(fetch_with_retry "the PR file listing" single_page_array \
+          files_json=$(fetch_with_retry "the PR file listing" single_document_array \
             gh api --paginate --slurp "repos/${REPO}/pulls/${PR_NUM}/files?per_page=100")
 
           allowed=$(printf '%s' "$pr_json" \
