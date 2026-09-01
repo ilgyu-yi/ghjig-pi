@@ -219,8 +219,15 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	 * their live object; anything above or beside it is not.
 	 */
 	function assertInsideFixture(named: string, fixture: string): void {
+		// Resolved, not textual: `<fixture>/../../victim` satisfies a bare
+		// prefix test. Unreachable through today's `recoveryFor`, whose paths
+		// all pass through `join`/`dirname`, but the guard exists because a
+		// mutant may make the clause name anything — so it must not rest on a
+		// property of the function it is guarding against.
+		const here = resolve(named);
+		const root = resolve(fixture);
 		assert.ok(
-			named === fixture || named.startsWith(fixture + sep),
+			here === root || here.startsWith(root + sep),
 			`the recovery clause names ${named}, which the fixture at ${fixture} does not own. This arm PERFORMS what the clause names, so it refuses to act rather than reach outside the fixture — the selection that produced this path is what the arm exists to measure, and a guard that destroys evidence when it fires is the wrong shape`,
 		);
 	}
@@ -577,10 +584,12 @@ describe("audit primitive: the record write is all-or-raise (§3.12)", () => {
 			//
 			// Reach: on a host whose pipe buffer is 1 MiB or larger the payload
 			// goes in whole, no short write occurs, and the arm measures nothing —
-			// both assertions are implications, so both hold vacuously there and
-			// the `writeSync` mutant survives. The arm passes on such a host
-			// without having measured anything; raising the payload would only
-			// move the same limit to a larger number.
+			// both assertions are implications: the second holds vacuously,
+			// its antecedent being false, while the first holds by its
+			// consequent. Neither discriminates, so the `writeSync` mutant
+			// survives and the arm passes without having measured anything;
+			// raising the payload would only move the same limit to a larger
+			// number.
 			const line = `${"x".repeat(1024 * 1024)}\n`;
 			const size = Buffer.byteLength(line);
 			let returned = false;
