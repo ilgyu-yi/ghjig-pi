@@ -279,7 +279,7 @@ export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string)
 	return (
 		`make ${sinkPath} a plain file writable by this account, then re-run — ` +
 		`a directory, a symlink, or another account's file at that path all refuse the append ` +
-		`(the sink is never followed through a link, so the record cannot be redirected away from the path the gate reads).`
+		`(a symlink at that final component is refused rather than followed; a hard link there, or a symlink at a parent, is not — see #44).`
 	);
 }
 
