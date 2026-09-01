@@ -9,12 +9,6 @@ name: check-changelog
 # Pure bash + gh. No third-party Actions;
 # actions/checkout is the canonical GitHub-shipped equivalent of `git
 # clone`.
-#
-# Does NOT self-trigger on its own landing PR — GitHub's pull_request
-# security policy excludes workflow files modified inside a PR from
-# running on that PR (otherwise a fork could exfiltrate secrets via a
-# self-modified workflow). The first PR after this workflow lands on
-# `main` is the first empirical observation.
 
 on:
   pull_request:
