@@ -65,17 +65,30 @@ jobs:
           # output, or with none, is a failure the caller has to see. Each
           # call site therefore names a validity predicate, and an attempt
           # whose output fails it is retried like any other failure.
+          # Each predicate carries three clauses, and dropping any one of them
+          # admits a shape measured to reach a wrong verdict. `-s` slurps the
+          # response into an array of documents, so `length == 1` is what
+          # rejects a CONCATENATED pair — `jq -e 'type == "object"'` over a
+          # two-document stream exits 0, and the second document's `.number`
+          # then widens the allow-set. The type clause rejects a zero-exit body
+          # of the wrong shape, and the emptiness clause rejects one that
+          # parses and carries nothing.
           nonempty_object() {
             [ -n "$1" ] || return 1
-            printf '%s' "$1" | jq -e 'type == "object"' >/dev/null 2>&1
+            printf '%s' "$1" \
+              | jq -e -s 'length == 1 and (.[0] | type == "object") and (.[0] | length > 0)' \
+                >/dev/null 2>&1
           }
 
           # The listing is the paginated shape `--slurp` produces: an array of
-          # pages. `jq -e` rejects a zero-exit body that is not JSON at all,
-          # which the status-only test admitted.
+          # pages, so emptiness has to be counted across the pages rather than
+          # on the outer array — `[[]]` is an outer array of length 1 and would
+          # otherwise pass. A trailing empty page is legitimate and still does.
           nonempty_page_array() {
             [ -n "$1" ] || return 1
-            printf '%s' "$1" | jq -e 'type == "array"' >/dev/null 2>&1
+            printf '%s' "$1" \
+              | jq -e -s 'length == 1 and (.[0] | type == "array") and ([.[0][]?[]?] | length > 0)' \
+                >/dev/null 2>&1
           }
 
           fetch_with_retry() {

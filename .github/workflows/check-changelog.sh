@@ -85,29 +85,26 @@ EXPECTED=""
 ALLOWED=""
 ROOT="."
 
+# Each flag takes one value. The shift is done once, after the case, and the
+# second one is guarded: `shift 2` on a trailing flag with no value fails under
+# `set -e`, which killed the script before the required-args arm below could
+# report the omission — the caller saw exit 1 with an empty stderr and read it
+# as a block, which is the one thing the exit contract above forbids.
 while [ $# -gt 0 ]; do
 	case "$1" in
-		--pr)
-			PR=${2:-}
-			shift 2
-			;;
-		--expected-count)
-			EXPECTED=${2:-}
-			shift 2
-			;;
-		--allowed)
-			ALLOWED=${2:-}
-			shift 2
-			;;
-		--root)
-			ROOT=${2:-}
-			shift 2
-			;;
+		--pr)             PR=${2:-} ;;
+		--expected-count) EXPECTED=${2:-} ;;
+		--allowed)        ALLOWED=${2:-} ;;
+		--root)           ROOT=${2:-} ;;
 		*)
 			echo "::error::check-changelog: unrecognized argument '$1'. Usage: check-changelog.sh --pr <n> --expected-count <n> --allowed '<stems>' --root <dir>" >&2
 			exit 1
 			;;
 	esac
+	shift
+	if [ $# -gt 0 ]; then
+		shift
+	fi
 done
 
 # `--allowed` is required alongside the other two. An absent allow-set is not
@@ -187,10 +184,18 @@ payload=$(cat)
 # length below come back blank; without this arm the truncation arm renders
 # "returned  file entries" and asserts a partial view of a listing the gate
 # never read. Distinct message, distinct cause.
-if [ -z "${payload//[[:space:]]/}" ]; then
-	echo "::error::The gate was handed an empty PR file listing on stdin, so it read no entries at all. This is a transport failure, not truncation, and NOT a missing-fragment failure; re-run the job." >&2
-	exit 1
-fi
+#
+# Tested with `case`, not `${payload//[[:space:]]/}`: the substitution rebuilds
+# the whole payload per match and is superlinear, so on a listing of any real
+# size it does not return. The `case` short-circuits at the first non-space
+# byte. Same truth table, same message, same exit code.
+case "$payload" in
+	*[![:space:]]*) ;;
+	*)
+		echo "::error::The gate was handed an empty PR file listing on stdin, so it read no entries at all. This is a transport failure, not truncation, and NOT a missing-fragment failure; re-run the job." >&2
+		exit 1
+		;;
+esac
 
 # Splits one @tsv row into its three fields by position. `IFS=$'\t' read` is
 # unusable here: tab is IFS whitespace, so a row whose leading field is empty
