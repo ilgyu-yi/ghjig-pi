@@ -23,13 +23,17 @@
  *   - no action method at extension load, checked against the D1-calibrated
  *     failure class (§3.2; §3.9 refuse-not-approve);
  *   - D2 tree isolation: `git status --porcelain` identical before/after,
- *     and the operational state root `<repo>/.ghjig/state/` absent on both
- *     sides (§5.5 — the seam, never the operational sink). The assertion
- *     targets `.ghjig/state/` rather than all of `.ghjig/` because `.ghjig/`
- *     legitimately holds per-clone untracked binding state in a working
- *     clone (§4.1); the runtime's own sink is what must stay untouched.
+ *     and the operational state root `<repo>/.ghjig/state/` in the same
+ *     existence state after the suite as before it — the suite creates
+ *     nothing there (§5.5 — the seam, never the operational sink). The
+ *     assertion targets `.ghjig/state/` rather than all of `.ghjig/` because
+ *     `.ghjig/` legitimately holds per-clone untracked binding state in a
+ *     working clone (§4.1); the runtime's own sink is what must stay
+ *     untouched.
  *   - polluted-ambient re-run: byte-identical resolution and zero writes
- *     into a decoy tree (§4.6).
+ *     into a decoy tree (§4.6), under a positive control that the decoy
+ *     variables reached the child process — without it the block would pass
+ *     just as well on a run that was never polluted.
  */
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -60,6 +64,19 @@ const DECOY_VARS = ["GHJIG_ROOT", "GHJIG_STATE_ROOT", "GHJIG_PI_ROOT", "PI_STATE
 
 const SCRIPT: ScriptTurn[] = [
 	{ kind: "toolCall", name: "bash", arguments: { command: "echo GHJIG_IT_TOOL_RAN" } },
+	{ kind: "text", text: "GHJIG_IT_DONE" },
+];
+
+/**
+ * The polluted run's script differs from `SCRIPT` in one respect: its tool
+ * call reports the ambient environment the child actually received. The
+ * witness is read back out of the session JSONL, so the block's
+ * immunity claims rest on a run that is demonstrably polluted rather than on
+ * the builder's intent to pollute it.
+ */
+const DECOY_WITNESS = "GHJIG_DECOY_SEEN";
+const POLLUTED_SCRIPT: ScriptTurn[] = [
+	{ kind: "toolCall", name: "bash", arguments: { command: `echo "${DECOY_WITNESS}=[$GHJIG_ROOT]"` } },
 	{ kind: "text", text: "GHJIG_IT_DONE" },
 ];
 
@@ -141,7 +158,7 @@ before(async () => {
 	mkdirSync(join(decoyTree, ".ghjig", "state"), { recursive: true });
 	writeFileSync(join(decoyTree, ".pi", "extensions", "look-alike.ts"), "// decoy\n");
 	decoyEntriesBefore = listTreeEntries(decoyTree);
-	pollutedFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	pollutedFixture = buildFixture({ script: POLLUTED_SCRIPT, linkGhjigRuntime: true });
 	const decoyEnv: Record<string, string> = {};
 	for (const name of DECOY_VARS) {
 		decoyEnv[name] = decoyTree;
@@ -312,6 +329,21 @@ describe("AC3: audit record encoding, demonstrated on the live run (§5.5)", () 
 });
 
 describe("AC4: polluted ambient environment (§4.6)", () => {
+	it("positive control: the decoy variables reached the child process", () => {
+		// Every other arm in this block asserts that the decoys changed
+		// nothing. That claim is only worth something if the decoys were
+		// there: the run's own tool call echoes GHJIG_ROOT back into the
+		// session JSONL, so the pollution is measured on the child, not
+		// assumed from the environment the harness assembled.
+		const witness = readSessionEntries(pollutedFixture).some((entry) =>
+			JSON.stringify(entry).includes(`${DECOY_WITNESS}=[${decoyTree}]`),
+		);
+		assert.ok(
+			witness,
+			`the polluted run never reported ${DECOY_WITNESS}=[${decoyTree}]: the decoy variables did not reach the child, so every immunity assertion in this block is vacuous\n${diagnostics(pollutedRun)}`,
+		);
+	});
+
 	it("the polluted run completes (exit 0, no timeout)", () => {
 		assert.equal(pollutedRun.exitCode, 0, diagnostics(pollutedRun));
 	});
@@ -383,9 +415,17 @@ describe("AC4: the harness seam has exactly one door (§4.6)", () => {
 });
 
 describe("AC2/D2: repository-tree isolation snapshot", () => {
-	it("leaves the operational state root absent (never created by test runs)", () => {
-		assert.equal(operationalRootExistedBefore, false, `${OPERATIONAL_STATE_ROOT} existed before the suite ran`);
-		assert.equal(existsSync(OPERATIONAL_STATE_ROOT), false, `${OPERATIONAL_STATE_ROOT} was created by the suite`);
+	it("creates nothing at the operational state root (§5.5)", () => {
+		// The claim is about what this suite did, not about what happens to be
+		// on disk: existence after the suite equals existence before it. Stated
+		// as two absolute falses the arm would also fail on a clone where an
+		// operational writer had legitimately created the root, and would stop
+		// measuring the suite the moment such a writer exists.
+		assert.equal(
+			existsSync(OPERATIONAL_STATE_ROOT),
+			operationalRootExistedBefore,
+			`${OPERATIONAL_STATE_ROOT} changed existence across the suite: a test run must resolve state to a disposable root and never touch the operational sink`,
+		);
 	});
 
 	it("leaves git status --porcelain byte-identical to the pre-suite snapshot", () => {

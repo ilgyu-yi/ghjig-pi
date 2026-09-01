@@ -7,27 +7,47 @@
  *   - audit.ts    — one JSON object per line; free text encoded at write
  *                   time so embedded newlines/control characters never
  *                   split a record (§5.5); append to a missing destination
- *                   fails open without throwing (§3.9 posture row).
+ *                   fails open without throwing (§3.9 posture row); the
+ *                   sink is the path the consuming gate reads and nothing
+ *                   else (§4.6), readable only by the account that writes
+ *                   it (§5.5), and its degradation signal names a recovery
+ *                   that is live where it is emitted (§3.11).
  *   - state-root.ts — resolution matrix: no seam → operational path
  *                   computed, nothing created; seam → override with
  *                   `seamActive: true`; malformed/unusable seam → refusal,
  *                   never a fallback to the operational sink (§5.5, §3.9).
  *   - locate.ts   — self-location from the installed module path: cwd-
- *                   independent, immune to decoy ambient variables (§4.6),
- *                   and bounded below by the install root so a `.pi/`
- *                   inside the install tree can never become the
- *                   repository root (§4.7).
+ *                   independent for every entry (§4.6), immune to decoy
+ *                   ambient variables (§4.6), bounded below by the install
+ *                   root — decided component-wise, so a directory whose
+ *                   name merely shares a prefix with the traversal token
+ *                   is bounded like any other (§4.6, §4.7) — and answering
+ *                   rather than throwing when the filesystem refuses a
+ *                   probe (§3.9 `repo-root-discovery`).
  *   - postures.ts — the §3.9 fail-posture inventory: exactly the three
  *                   shipped dependencies, each with a posture, and every
  *                   fail-closed row with an in-place justification.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { appendAuditRecord } from "../.pi/extensions/ghjig/audit.ts";
+// The sink's name comes from the runtime itself: an arm that plants a symlink
+// or reads a mode has to address exactly the path the runtime appends to, so a
+// rename there moves the arm with it instead of quietly aiming it elsewhere.
+import { appendAuditRecord, AUDIT_FILE_NAME } from "../.pi/extensions/ghjig/audit.ts";
 import { locateRepoRoot, locateRepoRootFrom } from "../.pi/extensions/ghjig/locate.ts";
 import { POSTURES } from "../.pi/extensions/ghjig/postures.ts";
 import { resolveStateRoot } from "../.pi/extensions/ghjig/state-root.ts";
@@ -138,6 +158,117 @@ describe("audit primitive: one-line encoded records (§5.5)", () => {
 		assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
 		assert.match(warnings[0], /no audit evidence is being recorded/);
 		assert.match(warnings[0], /NOT ENFORCED/);
+	});
+});
+
+describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", () => {
+	const INPUT = { category: "test", action: "sink", text: "evidence" };
+
+	/** The recovery clause of a degradation signal, if the signal carries one. */
+	function recoveryClause(warning: string): string | undefined {
+		return /Recovery:\s*(.+)$/s.exec(warning)?.[1];
+	}
+
+	/**
+	 * The directory a recovery clause tells the operator to create. The arm
+	 * that runs the recovery needs one machine-readable handle on it: an
+	 * absolute path in the clause, either the destination directory itself or
+	 * the sink file inside it. Absolute-path shape is POSIX here; a host with
+	 * another path grammar needs this reader widened, not the contract.
+	 */
+	function destinationNamedIn(clause: string): string | undefined {
+		const found = /(\/[^\s'"`]+)/.exec(clause)?.[1];
+		if (found === undefined) {
+			return undefined;
+		}
+		const path = found.replace(/[.,;:)'"`]+$/, "");
+		return path.endsWith(`/${AUDIT_FILE_NAME}`) ? dirname(path) : path;
+	}
+
+	it("leaves a symlink's target untouched: the record lands at the audit path itself (§4.6)", () => {
+		// Write-target equals read-target: a link planted at the sink path must
+		// not send the evidence somewhere the consuming gate never reads.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-link-"));
+		try {
+			const elsewhere = join(stateRoot, "elsewhere");
+			mkdirSync(elsewhere);
+			const target = join(elsewhere, "captured.log");
+			writeFileSync(target, "");
+			symlinkSync(target, join(stateRoot, AUDIT_FILE_NAME));
+			captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			assert.equal(
+				readFileSync(target, "utf8"),
+				"",
+				"the audit record was written through the symlink into its target: the evidence sink is redirectable",
+			);
+		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("creates the sink readable only by the account that writes it (§5.5)", {
+		// POSIX permission bits. On a host that does not carry them the mode
+		// says nothing about who may read the file, so the arm measures nothing
+		// rather than reporting a result it cannot support.
+		skip: process.platform === "win32" ? "POSIX permission bits" : false,
+	}, () => {
+		// The umask is normalised to 0 for the measurement. Left at the host's
+		// default this arm would pass on any machine whose umask already masks
+		// group and other, without the writer ever declaring a mode — the
+		// vacuous pass the mode contract exists to rule out.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-mode-"));
+		const savedUmask = process.umask(0o000);
+		try {
+			appendAuditRecord(stateRoot, INPUT);
+			assert.equal(
+				(statSync(join(stateRoot, AUDIT_FILE_NAME)).mode & 0o777).toString(8),
+				"600",
+				"the audit sink is created under the ambient umask: an audit record names what a repository's work touched, and a host may carry accounts that work never concerned",
+			);
+		} finally {
+			process.umask(savedUmask);
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("names a recovery in the degraded-append signal (§3.11)", () => {
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-signal-"));
+		try {
+			const { warnings } = captureWarnings(() =>
+				appendAuditRecord(join(stateRoot, "no-such-dir", "deeper"), INPUT),
+			);
+			assert.ok(
+				recoveryClause(warnings[0] ?? "") !== undefined,
+				`the degradation signal states cause and consequence but no way to restore the trail: ${JSON.stringify(warnings)}`,
+			);
+		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("names a recovery that is live at this surface: performing it restores the trail (§3.11)", () => {
+		// Asserted by running the recovery, not by matching its prose: the arm
+		// creates the destination the signal names and appends again. A signal
+		// naming a recovery that does not restore the trail is worse than one
+		// naming none.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-recovery-"));
+		try {
+			const missing = join(stateRoot, "no-such-dir", "deeper");
+			const { warnings } = captureWarnings(() => appendAuditRecord(missing, INPUT));
+			const clause = recoveryClause(warnings[0] ?? "");
+			const destination = clause === undefined ? undefined : destinationNamedIn(clause);
+			if (destination !== undefined) {
+				mkdirSync(destination, { recursive: true });
+			}
+			const restored = captureWarnings(() => appendAuditRecord(missing, INPUT)).value;
+			assert.equal(
+				restored,
+				true,
+				`following the recovery the signal named did not restore the audit trail. signal: ${JSON.stringify(warnings[0])}; recovery clause: ${JSON.stringify(clause)}; destination created: ${JSON.stringify(destination)}`,
+			);
+		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -299,6 +430,34 @@ describe("locate: candidate admissibility bound (§4.7)", () => {
 		}
 	});
 
+	it("rejects a .pi/ below the install root whose directory name begins with the traversal token", () => {
+		// `..z` is an ordinary directory name that merely shares a prefix with
+		// `..`. Below the install root it is the same subproject candidate the
+		// bound rejects under any other name, and adopting it relocates the
+		// evidence sink into the install tree — the outcome the bound exists to
+		// prevent (§4.7), reached through the prefix collision §4.6 forbids
+		// from mis-scoping in either direction.
+		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
+		try {
+			mkdirSync(join(root, ".pi"));
+			const below = join(root, "..z");
+			mkdirSync(join(below, ".pi"), { recursive: true });
+			// Three levels below <root>, so the structural root is <root> and
+			// `<root>/..z` sits strictly inside it.
+			const installDir = join(below, "nested", "install");
+			mkdirSync(installDir, { recursive: true });
+			const moduleFile = join(installDir, "locate.ts");
+			writeFileSync(moduleFile, "// stand-in for the installed module\n");
+			assert.equal(
+				captureWarnings(() => locateRepoRootFrom(moduleFile)).value,
+				root,
+				"a .pi/ below the install root must never be adopted as the repo root, whatever its directory is named",
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("still accepts a .pi/ ancestor above the install root (upper bound unmoved)", () => {
 		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
 		try {
@@ -326,6 +485,75 @@ describe("locate: candidate admissibility bound (§4.7)", () => {
 			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
 			assert.match(warnings[0], /repo-root discovery failed/);
 		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("locate: every entry resolves without the working directory (§4.6)", () => {
+	/** The outcome of one resolution, compared across working directories. */
+	type Outcome = { root: string } | { refused: true };
+
+	function resolveFrom(cwd: string, moduleFile: string): Outcome {
+		const originalCwd = process.cwd();
+		process.chdir(cwd);
+		try {
+			return { root: captureWarnings(() => locateRepoRootFrom(moduleFile)).value };
+		} catch {
+			// A refusal is a legitimate answer to an argument the module cannot
+			// anchor; what it must not be is a different answer per directory.
+			return { refused: true };
+		} finally {
+			process.chdir(originalCwd);
+		}
+	}
+
+	it("answers one argument identically from every working directory", () => {
+		// The module states it never consults the process working directory. A
+		// relative `moduleFile` is the entry where that can break: whatever the
+		// resolution makes of such an argument, it must make the same of it
+		// wherever the process happens to stand.
+		const root = mkdtempSync(join(tmpdir(), "ghjig-cwd-"));
+		try {
+			const installDir = join(root, "x", "nested", "install");
+			mkdirSync(installDir, { recursive: true });
+			mkdirSync(join(root, "x", ".pi"), { recursive: true });
+			writeFileSync(join(installDir, "locate.ts"), "// stand-in for the installed module\n");
+			assert.deepEqual(
+				resolveFrom(installDir, "locate.ts"),
+				resolveFrom(join(root, "x"), "locate.ts"),
+				"the same module argument resolved to different repository roots from two working directories",
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("locate: probes answer rather than throw (§3.9 repo-root-discovery)", () => {
+	it("returns a root when the filesystem refuses a probe on the walk", () => {
+		// `repo-root-discovery` is an open posture and the resolution runs
+		// inside the extension factory, so a throw here does not degrade the
+		// walk — it aborts extension load, the fail-closed outcome that row
+		// denies.
+		//
+		// Reach: this arm stages the refusal POSIX permissions can stage. It
+		// measures nothing on a host that grants access regardless of mode (a
+		// root container, or a filesystem without permission bits), and it
+		// cannot stage a refusal that arrives BETWEEN two probes of the same
+		// path — that one is a race, not a state a check can construct.
+		const root = mkdtempSync(join(tmpdir(), "ghjig-refuse-"));
+		const blocked = join(root, "blocked");
+		const installDir = join(blocked, "nested", "install");
+		mkdirSync(installDir, { recursive: true });
+		mkdirSync(join(blocked, ".pi"));
+		chmodSync(blocked, 0o000);
+		try {
+			assert.doesNotThrow(() =>
+				captureWarnings(() => locateRepoRootFrom(join(installDir, "locate.ts"))),
+			);
+		} finally {
+			chmodSync(blocked, 0o755);
 			rmSync(root, { recursive: true, force: true });
 		}
 	});
