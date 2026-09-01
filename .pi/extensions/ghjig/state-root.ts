@@ -22,6 +22,21 @@
  * Every refusal names its own live recovery (§3.11), because the
  * surrounding substrate otherwise offers the operator only a total
  * extension-layer disarm.
+ *
+ * UNMODELLED residual (§3.11 — a gate enumerates in place the vectors it
+ * deliberately does not model, so a residual reads as a decision rather
+ * than an oversight): the seam target is measured with two probes of one
+ * path, `existsSync` then `statSync`. A target that stops being
+ * measurable BETWEEN them makes the second probe throw a raw filesystem
+ * error, and `resolveStateRoot` is called at extension-factory scope, so
+ * that error escapes the same way a refusal does — but carrying neither
+ * this module's refusal text nor its `RECOVERY` string, which is the
+ * remediation every arm here otherwise owes. Refusing is what the
+ * fail-closed `seam-target` row prescribes, so the fail direction is
+ * unaffected; what is lost is the recovery the operator is told. This is
+ * stated as unmodelled, not handled: no arm covers it, nothing here
+ * narrows it, and the trigger is an inter-probe race no honest check can
+ * stage (§3.12).
  */
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";

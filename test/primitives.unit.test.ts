@@ -170,19 +170,39 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	}
 
 	/**
-	 * The directory a recovery clause tells the operator to create. The arm
-	 * that runs the recovery needs one machine-readable handle on it: an
-	 * absolute path in the clause, either the destination directory itself or
-	 * the sink file inside it. Absolute-path shape is POSIX here; a host with
+	 * The object a recovery clause names. An arm that RUNS the recovery
+	 * rather than matching its prose needs one machine-readable handle on
+	 * it, and a clause naming the wrong object is exactly what these arms
+	 * are for: the handle is read raw, never repaired toward whatever the
+	 * arm was hoping for. Absolute-path shape is POSIX here; a host with
 	 * another path grammar needs this reader widened, not the contract.
 	 */
-	function destinationNamedIn(clause: string): string | undefined {
+	function pathNamedIn(clause: string): string | undefined {
 		const found = /(\/[^\s'"`]+)/.exec(clause)?.[1];
-		if (found === undefined) {
+		return found === undefined ? undefined : found.replace(/[.,;:)'"`]+$/, "");
+	}
+
+	/**
+	 * The directory a recovery clause tells the operator to create: the path
+	 * it names, or the directory holding it when what it names is the sink
+	 * file inside that directory.
+	 */
+	function destinationNamedIn(clause: string): string | undefined {
+		const path = pathNamedIn(clause);
+		if (path === undefined) {
 			return undefined;
 		}
-		const path = found.replace(/[.,;:)'"`]+$/, "");
 		return path.endsWith(`/${AUDIT_FILE_NAME}`) ? dirname(path) : path;
+	}
+
+	/** Performs `act`, reporting what happened for the arm's failure message. */
+	function perform(description: string, act: () => void): string {
+		try {
+			act();
+			return description;
+		} catch (error) {
+			return `${description} — could not be performed: ${String(error)}`;
+		}
 	}
 
 	it("leaves a symlink's target untouched: the record lands at the audit path itself (§4.6)", () => {
@@ -267,6 +287,77 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 				`following the recovery the signal named did not restore the audit trail. signal: ${JSON.stringify(warnings[0])}; recovery clause: ${JSON.stringify(clause)}; destination created: ${JSON.stringify(destination)}`,
 			);
 		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("names a live recovery when an ancestor of the destination is a plain file (§3.11)", () => {
+		// `<repo>/.ghjig` existing as a file is an honest mistake, not a hostile
+		// one, so this arm is owed a live recovery. Nothing can be created
+		// beneath a plain file, so a clause naming the sink path prescribes an
+		// act the operator cannot perform: the live object is the non-directory
+		// component. The arm performs the clause on exactly the path the clause
+		// names — replacing it with a directory — and never repairs that path
+		// toward the one it was hoping for.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-audit-notdir-"));
+		try {
+			writeFileSync(join(base, ".ghjig"), "a file where a directory was meant");
+			const stateRoot = join(base, ".ghjig", "state");
+			const { warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			const clause = recoveryClause(warnings[0] ?? "");
+			const named = clause === undefined ? undefined : pathNamedIn(clause);
+			const performed =
+				named === undefined
+					? "no path named"
+					: perform(`replaced ${named} with a directory, then created ${stateRoot}`, () => {
+							rmSync(named, { recursive: true, force: true });
+							mkdirSync(stateRoot, { recursive: true });
+						});
+			assert.equal(
+				captureWarnings(() => appendAuditRecord(stateRoot, INPUT)).value,
+				true,
+				`the signal names a recovery that is dead where it is emitted. signal: ${JSON.stringify(warnings[0])}; recovery clause: ${JSON.stringify(clause)}; performing it: ${performed}`,
+			);
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("names a live recovery when the destination directory refuses the create (§3.11)", {
+		// POSIX permission bits, and an account the mode actually binds: for a
+		// superuser the directory refuses nothing, so the arm would measure the
+		// message against a failure that never occurred.
+		skip:
+			process.platform === "win32"
+				? "POSIX permission bits"
+				: process.getuid?.() === 0
+					? "the directory mode refuses nothing for this account"
+					: false,
+	}, () => {
+		// `.ghjig/state` created with restrictive permissions is an honest
+		// mistake. The sink does not exist and cannot be created, so a clause
+		// naming the sink prescribes an act on an object that is not there; the
+		// live object is the directory's mode.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-refuse-"));
+		try {
+			chmodSync(stateRoot, 0o500);
+			const { value, warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			assert.equal(value, false, "the arm measures nothing unless the directory mode refuses the create");
+			const clause = recoveryClause(warnings[0] ?? "");
+			const named = clause === undefined ? undefined : pathNamedIn(clause);
+			const performed =
+				named === undefined
+					? "no path named"
+					: perform(`granted this account write and search permission on ${named}`, () =>
+							chmodSync(named, 0o700),
+						);
+			assert.equal(
+				captureWarnings(() => appendAuditRecord(stateRoot, INPUT)).value,
+				true,
+				`the signal names a recovery that is dead where it is emitted. signal: ${JSON.stringify(warnings[0])}; recovery clause: ${JSON.stringify(clause)}; performing it: ${performed}`,
+			);
+		} finally {
+			chmodSync(stateRoot, 0o700);
 			rmSync(stateRoot, { recursive: true, force: true });
 		}
 	});
