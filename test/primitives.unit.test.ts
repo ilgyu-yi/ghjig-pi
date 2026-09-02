@@ -1329,11 +1329,19 @@ describe("locate: probes answer rather than throw (§3.9 repo-root-discovery)", 
 });
 
 describe("fail-posture inventory (§3.9)", () => {
-	it("declares exactly the three shipped dependencies", () => {
-		assert.deepEqual(
-			POSTURES.map((row) => row.dependency).sort(),
-			["audit-append", "repo-root-discovery", "seam-target"],
-		);
+	it("declares exactly the shipped enforcement-layer rows, keyed on failure shape", () => {
+		assert.deepEqual(POSTURES.map((row) => `${row.dependency} → ${row.posture}`).sort(), [
+			"audit-append → open",
+			"commit-format-helper → open",
+			"commit-format-helper → open",
+			"commit-format-measurement → closed",
+			"repo-root-discovery → open",
+			"seam-target → closed",
+		]);
+		// One component may carry several rows — one posture per failure
+		// shape (§3.9) — but two rows never share a failure shape.
+		const shapes = POSTURES.map((row) => row.failureShape);
+		assert.equal(new Set(shapes).size, shapes.length, "duplicate failureShape rows");
 	});
 
 	it("keys each row on a failure shape, not a component", () => {
@@ -1345,16 +1353,21 @@ describe("fail-posture inventory (§3.9)", () => {
 		}
 	});
 
-	it("fails open on missing repo-root discovery and audit append", () => {
-		for (const dependency of ["repo-root-discovery", "audit-append"]) {
-			const row = POSTURES.find((candidate) => candidate.dependency === dependency);
-			assert.equal(row?.posture, "open", `posture for ${dependency}`);
+	it("fails open on enforcement-chain degradation (§3.9's machinery carve-out)", () => {
+		for (const dependency of ["repo-root-discovery", "audit-append", "commit-format-helper"]) {
+			const rows = POSTURES.filter((candidate) => candidate.dependency === dependency);
+			assert.ok(rows.length > 0, `no row for ${dependency}`);
+			for (const row of rows) {
+				assert.equal(row.posture, "open", `posture for ${dependency} (${row.failureShape})`);
+			}
 		}
 	});
 
-	it("fails closed on an unusable seam target", () => {
-		const row = POSTURES.find((candidate) => candidate.dependency === "seam-target");
-		assert.equal(row?.posture, "closed");
+	it("fails closed where present-but-cannot-measure would otherwise vouch", () => {
+		for (const dependency of ["seam-target", "commit-format-measurement"]) {
+			const row = POSTURES.find((candidate) => candidate.dependency === dependency);
+			assert.equal(row?.posture, "closed", `posture for ${dependency}`);
+		}
 	});
 
 	it("carries a non-empty in-place justification on every fail-closed row", () => {
