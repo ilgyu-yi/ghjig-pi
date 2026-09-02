@@ -365,11 +365,17 @@ describe("boundary pins — green in both tree states (issue #59)", { skip: IS_W
 	});
 
 	it("pre-commit stays inert: a commit on the protected branch itself succeeds while secret_scan.sh is absent", () => {
-		// The arming boundary (§3.3 commit arm): pre-commit's three-function
-		// require chain exits open at the absent secret_scan.sh — today at
-		// the branch_guard.sh source line, after the helper lands at the
-		// secret_scan.sh line — so this arm holds in both tree states and
-		// pins that shipping branch_guard.sh alone arms NO commit-side check.
+		// The arming boundary (§3.3 commit arm): while secret_scan.sh is
+		// absent, pre-commit's three-function require chain exits open at
+		// that source line, pinning that shipping branch_guard.sh alone arms
+		// NO commit-side check. Once the helper ships, the chain is armed
+		// and the OPPOSITE observable — this same commit refused — is pinned
+		// by the secret-scan suite's commit-on-P arm; the absence of the
+		// file is this arm's whole premise, so it holds vacuously then
+		// (the detached-HEAD arm below states the symmetric guard).
+		if (existsSync(join(repoRoot(), ".githooks", "helpers", "secret_scan.sh"))) {
+			return;
+		}
 		const fixture = buildGithookFixture({ remote: { defaultBranch: PROTECTED } });
 		try {
 			const attempt = commitWithMessage(fixture, "chore: exercise the commit-side chain\n");

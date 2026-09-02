@@ -1,0 +1,293 @@
+# .githooks/helpers/secret_scan.sh — the staged-secret class's delegated
+# scan (SPEC §3.3 secret row + staged-scan semantics statement; the
+# interface contract `.githooks/_lib.sh` states for this file). Sourced by
+# adapters through the per-clone binding, never executed; defines:
+#   scan_staged_secrets
+#
+# Rule source: the committed pattern file `.githooks/helpers/secret-patterns`,
+# resolved REPO-ROOT-relative (`git rev-parse --show-toplevel`), never
+# through the per-clone helper seam — the bytes both readers must agree on
+# are the committed repo file (§3.3's single-source rule). Format and the
+# compatible-extension-only rule live in that file's header.
+#
+# Measurement domain (§3.3): the added text lines of the staged diff, per
+# staged path — paths from `git diff --cached --name-only -z`, each then
+# addressed with a `:(literal)` pathspec; content read config-neutrally
+# (`--no-ext-diff --no-textconv --no-color -U0`); added lines identified
+# structurally from the diff's own hunk shape (a content line beginning
+# `++` is content, not a header). Binary is keyed by the numstat
+# no-line-counts outcome, never a prose message (§3.10). The first commit
+# of an unborn HEAD diffs against the empty tree, keyed by outcome. The
+# matcher is the hook interpreter's own ERE engine (`[[ =~ ]]`) under
+# LC_ALL=C byte semantics — no PATH-resolved external matcher enters the
+# verdict path.
+#
+# Outcomes (§3.3's three-disposition split under §3.9):
+#   - machinery degradation (pattern file absent/unreadable, an up-front
+#     pattern-validation failure, a set empty after stripping) → the scan
+#     disarms for the run with exactly one not-enforced audit warn record
+#     and allows — never a refusal of the actor's input;
+#   - unmeasurable input (binary by the numstat outcome, unrenderable
+#     staged content, a matcher failure at scan time over one input) →
+#     refused on its own content-free cause, distinct from a pattern match;
+#   - pattern match → refused; the record carries the pattern ID and the
+#     SANITIZED path and never the matched bytes or raw path bytes (§3.8).
+#
+# Path sanitization (stated choice): every byte outside printable ASCII,
+# plus '%' itself, is percent-encoded (%XX, uppercase hex) before the path
+# reaches any record sink — `githook_block` and `audit_log` interpolate
+# raw, and a hostile filename must not split or forge a record.
+#
+# Allow-list: the repo-root `.shellsecretignore` is domain exclusion, never
+# approval — literal or shell-glob lines, `#` comments, absent means empty;
+# a present-but-unreadable list emits one degradation warn record and the
+# scan proceeds with NO exclusions (it fails to excuse; it never approves
+# unmeasured).
+#
+# This file emits the CAUSE only; each calling surface appends the recovery
+# live at that surface (§3.11's arm-scoped remediation). Every git child
+# reads stdin from /dev/null (the adapter loop precedent). Fail-direction
+# bookkeeping lives in the one inventory at
+# `.pi/extensions/ghjig/postures.ts`, never re-decided here.
+#
+# Env-trust note (the branch_guard.sh `unset -v` precedent): this file
+# keeps NO file-scope `_GHJIG_SS_*` state — every variable below is
+# function-local, so there is no inherited cell for a caller's environment
+# to pre-seed and nothing to discard at source time.
+
+# _ghjig_ss_sanitize_path <raw-path> — print the percent-encoded rendering
+# (C-locale byte loop; printable ASCII except '%' passes through).
+_ghjig_ss_sanitize_path() {
+	local LC_ALL=C
+	local _ss_in="$1" _ss_out='' _ss_i=0 _ss_len _ss_ch
+	_ss_len=${#_ss_in}
+	while [ "$_ss_i" -lt "$_ss_len" ]; do
+		_ss_ch="${_ss_in:$_ss_i:1}"
+		case "$_ss_ch" in
+		'%') _ss_out="${_ss_out}%25" ;;
+		[[:print:]]) _ss_out="${_ss_out}${_ss_ch}" ;;
+		*)
+			printf -v _ss_ch '%%%02X' "'$_ss_ch"
+			_ss_out="${_ss_out}${_ss_ch}"
+			;;
+		esac
+		_ss_i=$((_ss_i + 1))
+	done
+	printf '%s\n' "$_ss_out"
+}
+
+# _ghjig_ss_disarm <reason-constant> — machinery degradation: exactly one
+# not-enforced warn record for the run, then the caller allows (§3.9).
+_ghjig_ss_disarm() {
+	if command -v audit_log >/dev/null 2>&1; then
+		( audit_log warn secret not-enforced "staged-secret scan not enforced: $1" ) </dev/null >/dev/null 2>&1 || true
+	fi
+	return 0
+}
+
+# _ghjig_ss_refuse_match <pattern-id> <raw-path> — pattern-match refusal:
+# pattern ID + sanitized path on both surfaces, never the matched bytes.
+_ghjig_ss_refuse_match() {
+	local _ss_id="$1" _ss_sp
+	_ss_sp="$(_ghjig_ss_sanitize_path "$2")"
+	printf '%s\n' "secret-scan: pattern '${_ss_id}' matched in staged path '${_ss_sp}' — refusing the commit" >&2
+	if command -v audit_log >/dev/null 2>&1; then
+		( audit_log block secret blocked "secret-scan: pattern '${_ss_id}' matched in staged path '${_ss_sp}'" ) </dev/null >/dev/null 2>&1 || true
+	fi
+	return 1
+}
+
+# _ghjig_ss_refuse_unmeasurable <raw-path> — the unmeasurable-input arm
+# (§3.9's measurement rule): its own cause, no pattern ID, content-free.
+_ghjig_ss_refuse_unmeasurable() {
+	local _ss_sp
+	_ss_sp="$(_ghjig_ss_sanitize_path "$1")"
+	printf '%s\n' "secret-scan: staged path '${_ss_sp}' has unmeasurable added content — refusing the commit" >&2
+	if command -v audit_log >/dev/null 2>&1; then
+		( audit_log block secret blocked "secret-scan: unmeasurable added content at staged path '${_ss_sp}'" ) </dev/null >/dev/null 2>&1 || true
+	fi
+	return 1
+}
+
+# _ghjig_ss_scan_path <raw-path> — scan one staged path's added lines.
+# Reads the caller's _ss_base/_ss_n/_ss_ids/_ss_eres via dynamic scope.
+# Returns 0 (clean) or 1 (refused; the record is already emitted).
+_ghjig_ss_scan_path() {
+	local _ss_p="$1"
+	local _ss_num _ss_first _ss_add _ss_rest _ss_del
+	if ! _ss_num="$(git diff --cached --no-ext-diff --no-textconv --no-color --numstat "$_ss_base" -- ":(literal)$_ss_p" 2>/dev/null </dev/null)"; then
+		_ghjig_ss_refuse_unmeasurable "$_ss_p"
+		return 1
+	fi
+	[ -n "$_ss_num" ] || return 0
+	# Binary is the numstat no-line-counts outcome: "-<TAB>-<TAB>..." (§3.10).
+	_ss_first="${_ss_num%%$'\n'*}"
+	_ss_add="${_ss_first%%$'\t'*}"
+	_ss_rest="${_ss_first#*$'\t'}"
+	_ss_del="${_ss_rest%%$'\t'*}"
+	if [ "$_ss_add" = "-" ] && [ "$_ss_del" = "-" ]; then
+		_ghjig_ss_refuse_unmeasurable "$_ss_p"
+		return 1
+	fi
+	local _ss_diff
+	if ! _ss_diff="$(git diff --cached --no-ext-diff --no-textconv --no-color -U0 "$_ss_base" -- ":(literal)$_ss_p" 2>/dev/null </dev/null)"; then
+		_ghjig_ss_refuse_unmeasurable "$_ss_p"
+		return 1
+	fi
+	# Structural hunk parse: only lines after a hunk header are body lines,
+	# and only body lines beginning '+' are added content — so a '+++'
+	# file header (before any hunk) is never dropped by a prefix guess,
+	# and a content line beginning '++' is kept as content.
+	local _ss_in_hunk=0 _ss_dline _ss_added _ss_i _ss_rc
+	while IFS= read -r _ss_dline; do
+		case "$_ss_dline" in
+		@@*)
+			_ss_in_hunk=1
+			continue
+			;;
+		esac
+		[ "$_ss_in_hunk" -eq 1 ] || continue
+		case "$_ss_dline" in
+		+*) _ss_added="${_ss_dline#+}" ;;
+		*) continue ;;
+		esac
+		_ss_i=0
+		while [ "$_ss_i" -lt "$_ss_n" ]; do
+			[[ "$_ss_added" =~ ${_ss_eres[$_ss_i]} ]]
+			_ss_rc=$?
+			if [ "$_ss_rc" -eq 0 ]; then
+				_ghjig_ss_refuse_match "${_ss_ids[$_ss_i]}" "$_ss_p"
+				return 1
+			elif [ "$_ss_rc" -ne 1 ]; then
+				# A matcher failure at scan time over one input is the
+				# input side of the timing split (§3.3), never a disarm.
+				_ghjig_ss_refuse_unmeasurable "$_ss_p"
+				return 1
+			fi
+			_ss_i=$((_ss_i + 1))
+		done
+	done <<<"$_ss_diff"
+	return 0
+}
+
+# scan_staged_secrets — the delegated predicate. Returns 0 to allow,
+# non-zero to refuse (the adapter appends its own recovery line).
+scan_staged_secrets() {
+	# LC_ALL=C for the run: [[ =~ ]] matches under byte semantics (§3.3's
+	# pinned matcher). Function-local, restored on return.
+	local LC_ALL=C
+	local _ss_top _ss_pf
+	_ss_top="$(git rev-parse --show-toplevel 2>/dev/null </dev/null)" || _ss_top=""
+	if [ -z "$_ss_top" ]; then
+		_ghjig_ss_disarm 'repository toplevel unresolvable'
+		return 0
+	fi
+
+	# Up-front pattern validation — machinery for the WHOLE run (§3.10's
+	# valid-AND-non-empty rule): any invalid row disarms before any path
+	# is scanned; a valid neighbour row never turns a partial scan.
+	_ss_pf="$_ss_top/.githooks/helpers/secret-patterns"
+	if [ ! -f "$_ss_pf" ] || [ ! -r "$_ss_pf" ]; then
+		_ghjig_ss_disarm 'pattern file absent or unreadable'
+		return 0
+	fi
+	local _ss_ids _ss_eres
+	local _ss_n=0 _ss_bad=0 _ss_row _ss_id _ss_ere _ss_stripped
+	local _ss_id_re='^[a-z][a-z0-9-]*$'
+	while IFS= read -r _ss_row || [ -n "$_ss_row" ]; do
+		case "$_ss_row" in
+		'#'*) continue ;;
+		esac
+		_ss_stripped="${_ss_row//[$' \t']/}"
+		[ -n "$_ss_stripped" ] || continue
+		case "$_ss_row" in
+		*$'\t'*) : ;;
+		*)
+			_ss_bad=1
+			break
+			;;
+		esac
+		_ss_id="${_ss_row%%$'\t'*}"
+		_ss_ere="${_ss_row#*$'\t'}"
+		if ! [[ "$_ss_id" =~ $_ss_id_re ]] || [ -z "$_ss_ere" ]; then
+			_ss_bad=1
+			break
+		fi
+		# ERE compile probe against the empty string, keyed by outcome:
+		# 0/1 = compiled (match/no match), anything else = regcomp failure.
+		[[ '' =~ $_ss_ere ]]
+		case "$?" in
+		0 | 1) : ;;
+		*)
+			_ss_bad=1
+			break
+			;;
+		esac
+		_ss_ids[$_ss_n]="$_ss_id"
+		_ss_eres[$_ss_n]="$_ss_ere"
+		_ss_n=$((_ss_n + 1))
+	done <"$_ss_pf"
+	if [ "$_ss_bad" -ne 0 ]; then
+		_ghjig_ss_disarm 'pattern file failed up-front validation'
+		return 0
+	fi
+	if [ "$_ss_n" -eq 0 ]; then
+		_ghjig_ss_disarm 'pattern set empty after stripping comments and blanks'
+		return 0
+	fi
+
+	# Diff base, keyed by outcome (§3.3): a born HEAD diffs against HEAD,
+	# an unborn HEAD against the empty tree — never a guess.
+	local _ss_base
+	if git rev-parse -q --verify 'HEAD^{commit}' >/dev/null 2>&1 </dev/null; then
+		_ss_base=HEAD
+	else
+		_ss_base="$(git hash-object -t tree /dev/null 2>/dev/null </dev/null)" || _ss_base=""
+		if [ -z "$_ss_base" ]; then
+			_ghjig_ss_disarm 'staged-diff base unresolvable'
+			return 0
+		fi
+	fi
+	if ! git diff --cached --name-only -z "$_ss_base" >/dev/null 2>&1 </dev/null; then
+		_ghjig_ss_disarm 'staged path enumeration failed'
+		return 0
+	fi
+
+	# Allow-list: domain exclusion, never approval (§3.3).
+	local _ss_ign="$_ss_top/.shellsecretignore" _ss_excl _ss_excl_n=0 _ss_line
+	if [ -f "$_ss_ign" ]; then
+		if [ -r "$_ss_ign" ]; then
+			while IFS= read -r _ss_line || [ -n "$_ss_line" ]; do
+				case "$_ss_line" in
+				'' | '#'*) continue ;;
+				esac
+				_ss_excl[$_ss_excl_n]="$_ss_line"
+				_ss_excl_n=$((_ss_excl_n + 1))
+			done <"$_ss_ign"
+		else
+			if command -v audit_log >/dev/null 2>&1; then
+				( audit_log warn secret allowlist-unreadable '.shellsecretignore is present but unreadable: the scan proceeds with no exclusions (it fails to excuse, never approves unmeasured)' ) </dev/null >/dev/null 2>&1 || true
+			fi
+		fi
+	fi
+
+	local _ss_path _ss_e _ss_skip
+	while IFS= read -r -d '' _ss_path; do
+		_ss_skip=0
+		_ss_e=0
+		while [ "$_ss_e" -lt "$_ss_excl_n" ]; do
+			# Literal or shell glob per line (unquoted pattern on purpose).
+			case "$_ss_path" in
+			${_ss_excl[$_ss_e]})
+				_ss_skip=1
+				break
+				;;
+			esac
+			_ss_e=$((_ss_e + 1))
+		done
+		if [ "$_ss_skip" -eq 0 ]; then
+			_ghjig_ss_scan_path "$_ss_path" || return 1
+		fi
+	done < <(git diff --cached --name-only -z "$_ss_base" 2>/dev/null </dev/null)
+	return 0
+}

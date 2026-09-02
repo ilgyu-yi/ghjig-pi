@@ -306,7 +306,12 @@ export function removeGithookFixture(fixture: GithookFixture): void {
  * Stage a fresh change and attempt `git commit -F <message>` through the
  * fixture's hook chain. The message travels as BYTES (a Buffer caller can
  * carry invalid UTF-8 or control bytes); the file lands under `.git/` so a
- * hostile message never dirties the fixture worktree.
+ * hostile message never dirties the fixture worktree. The commit runs `-q`
+ * on the same ground the pushRefs note states for stderr: git's own
+ * success summary echoes the branch name on stdout — a legitimate echo of
+ * the actor's own input, not a chain emission — so quieting it keeps the
+ * captured surfaces measuring the hook chain's emissions alone (hook
+ * stdout/stderr still pass through; `-q` silences only git's own summary).
  */
 export function commitWithMessage(
 	fixture: GithookFixture,
@@ -321,7 +326,7 @@ export function commitWithMessage(
 	writeFileSync(messageFile, message);
 
 	const auditBefore = existsSync(fixture.auditFile) ? readFileSync(fixture.auditFile, "utf8") : "";
-	const result = spawnSync("git", ["commit", ...(options.gitArgs ?? []), "-F", messageFile], {
+	const result = spawnSync("git", ["commit", "-q", ...(options.gitArgs ?? []), "-F", messageFile], {
 		cwd: fixture.root,
 		env: { ...baseEnv(fixture), ...(options.env ?? {}) },
 	});

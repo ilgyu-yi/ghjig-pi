@@ -1343,6 +1343,10 @@ describe("fail-posture inventory (§3.9)", () => {
 			"commit-format-measurement → closed",
 			"repo-root-discovery → open",
 			"seam-target → closed",
+			"secret-scan-helper → open",
+			"secret-scan-helper → open",
+			"secret-scan-measurement → closed",
+			"secret-scan-patterns → open",
 		]);
 		// One component may carry several rows — one posture per failure
 		// shape (§3.9) — but two rows never share a failure shape.

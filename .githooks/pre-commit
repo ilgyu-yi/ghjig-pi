@@ -15,7 +15,7 @@ githook_require scan_staged_secrets
 #    ref-identity semantics; master/release/* stay enumerated-unmodeled).
 _gh_branch="$(current_branch)"
 if is_protected_branch "$_gh_branch"; then
-  githook_block branch "pre-commit: direct commit to protected branch '${_gh_branch:-HEAD}' is blocked. Commit on a feature branch and open a PR."
+  githook_block branch "pre-commit: direct commit to the protected branch is blocked. Commit on a feature branch and open a PR."
   exit 1
 fi
 
