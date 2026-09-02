@@ -108,6 +108,12 @@ const HOSTILE_HEAD = "zqhostA";
 const HOSTILE_TAIL = "zqhostB.txt";
 const HOSTILE_NAME = HOSTILE_HEAD + cp(0x0a) + cp(0x1b) + "[31m" + HOSTILE_TAIL;
 
+// High-byte path material (%XX-fidelity arm): U+00E9 lands on disk and in
+// the index as the UTF-8 pair 0xC3 0xA9 — two bytes ≥ 0x80 for the
+// sanitizer's byte loop, built from a codepoint per the header note.
+const HIGH_BYTE_HEAD = "zqhi8a";
+const HIGH_BYTE_NAME = HIGH_BYTE_HEAD + cp(0xe9) + "zqhi8b.txt";
+
 // Binary staged input (unmeasurable-input arm): NUL bytes force git's
 // numstat to the `-<TAB>-` no-line-counts outcome; the printable marker
 // makes the content-absence assertion measurable.
@@ -335,6 +341,25 @@ describe("staged-secret refusals, one arm per pattern (issue #66)", { skip: IS_W
 			const attempt = commitWithMessage(fixture, "chore: exercise the colored-diff arm\n");
 			assertSecretRefused(attempt, "aws-access-key-id", "zqleakcolor.txt", AWS_SECRET, "color.diff=always");
 			assertBytesReachNoSurface(attempt, Buffer.from([0x1b]), "a raw ANSI escape byte", "color.diff=always");
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("a staged secret is refused with GIT_LITERAL_PATHSPECS=1 in the commit environment (env-neutral measurement)", () => {
+		// The pathspec-magic env family must not rewrite the scan's path
+		// addressing (§3.3's measurement-domain rule): with literal-pathspec
+		// parsing forced by the inherited environment, an unneutralized
+		// per-path read's `:(literal)` pathspec matches nothing and the scan
+		// would vouch for a path it never measured. Ambient tooling sets this
+		// variable, so the shape is reachable with no adversary.
+		const fixture = buildScanFixture();
+		try {
+			stageFile(fixture, "zqleakenv.txt", AWS_SECRET + "\n");
+			const attempt = commitWithMessage(fixture, "chore: exercise the ambient-env arm\n", {
+				env: { GIT_LITERAL_PATHSPECS: "1" },
+			});
+			assertSecretRefused(attempt, "aws-access-key-id", "zqleakenv.txt", AWS_SECRET, "ambient pathspec env");
 		} finally {
 			removeGithookFixture(fixture);
 		}
@@ -596,6 +621,53 @@ describe("a hostile-named path cannot split or forge a record (issue #66, SPEC �
 				"hostile path: the record splits the path — its head and tail must sit on ONE record line",
 			);
 			assert.match(naming[0], /\bblock\b/, "hostile path: the path-naming record is the refusal's block record");
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("a path byte ≥ 0x80 renders as its own uppercase two-hex-digit escape on the record (%XX fidelity)", () => {
+		// The sanitizer's stated rendering is one uppercase %XX per byte; a
+		// sign-extending renderer keeps the encoding injective but falsifies
+		// that contract for every non-ASCII path, so the pin is the positive
+		// rendering: the U+00E9 byte pair as exactly `%C3%A9` on both refusal
+		// surfaces, with the raw pair on neither.
+		const fixture = buildScanFixture();
+		try {
+			stageFile(fixture, HIGH_BYTE_NAME, AWS_SECRET + "\n");
+			const attempt = commitWithMessage(fixture, "chore: exercise the high-byte-path arm\n");
+			assert.match(
+				attempt.auditDelta,
+				/\bblock\b.*\bsecret\b/,
+				`high-byte path: no block record was appended — the commit fell through the chain; ` +
+					`delta: ${JSON.stringify(attempt.auditDelta)}`,
+			);
+			assert.notEqual(attempt.status, 0, "high-byte path: the guarded commit SUCCEEDED");
+			assertBytesReachNoSurface(
+				attempt,
+				Buffer.from([0xc3, 0xa9]),
+				"the raw ≥0x80 path byte pair",
+				"high-byte path",
+			);
+			assertBytesReachNoSurface(attempt, AWS_SECRET, "the planted secret's bytes", "high-byte path");
+			const naming = attempt.auditDelta.split("\n").filter((line) => line.includes(HIGH_BYTE_HEAD));
+			assert.equal(
+				naming.length,
+				1,
+				`high-byte path: expected exactly one record naming the sanitized path; ` +
+					`delta: ${JSON.stringify(attempt.auditDelta)}`,
+			);
+			assert.equal(
+				naming[0].includes("%C3%A9"),
+				true,
+				`high-byte path: the record's sanitized path does not render the ≥0x80 byte pair as %C3%A9 ` +
+					`(one uppercase %XX per byte — the stated §3.3 rendering): ${JSON.stringify(naming[0])}`,
+			);
+			assert.equal(
+				attempt.stderr.includes("%C3%A9"),
+				true,
+				"high-byte path: the refusal's stderr does not carry the %C3%A9 rendering of the offending path",
+			);
 		} finally {
 			removeGithookFixture(fixture);
 		}

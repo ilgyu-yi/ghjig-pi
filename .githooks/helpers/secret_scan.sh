@@ -13,7 +13,9 @@
 # Measurement domain (§3.3): the added text lines of the staged diff, per
 # staged path — paths from `git diff --cached --name-only -z`, each then
 # addressed with a `:(literal)` pathspec; content read config-neutrally
-# (`--no-ext-diff --no-textconv --no-color -U0`); added lines identified
+# (`--no-ext-diff --no-textconv --no-color -U0`) and env-neutrally (the
+# pathspec-magic env family is unset around every git-diff child — see
+# _ghjig_ss_git_diff); added lines identified
 # structurally from the diff's own hunk shape (a content line beginning
 # `++` is content, not a header). Binary is keyed by the numstat
 # no-line-counts outcome, never a prose message (§3.10). The first commit
@@ -28,8 +30,10 @@
 #     disarms for the run with exactly one not-enforced audit warn record
 #     and allows — never a refusal of the actor's input;
 #   - unmeasurable input (binary by the numstat outcome, unrenderable
-#     staged content, a matcher failure at scan time over one input) →
-#     refused on its own content-free cause, distinct from a pattern match;
+#     staged content, an empty per-path measurement for a path the
+#     enumeration itself listed, a matcher failure at scan time over one
+#     input) → refused on its own content-free cause, distinct from a
+#     pattern match;
 #   - pattern match → refused; the record carries the pattern ID and the
 #     SANITIZED path and never the matched bytes or raw path bytes (§3.8).
 #
@@ -59,7 +63,7 @@
 # (C-locale byte loop; printable ASCII except '%' passes through).
 _ghjig_ss_sanitize_path() {
 	local LC_ALL=C
-	local _ss_in="$1" _ss_out='' _ss_i=0 _ss_len _ss_ch
+	local _ss_in="$1" _ss_out='' _ss_i=0 _ss_len _ss_ch _ss_ord
 	_ss_len=${#_ss_in}
 	while [ "$_ss_i" -lt "$_ss_len" ]; do
 		_ss_ch="${_ss_in:$_ss_i:1}"
@@ -67,7 +71,11 @@ _ghjig_ss_sanitize_path() {
 		'%') _ss_out="${_ss_out}%25" ;;
 		[[:print:]]) _ss_out="${_ss_out}${_ss_ch}" ;;
 		*)
-			printf -v _ss_ch '%%%02X' "'$_ss_ch"
+			# The ordinal is masked to one byte before rendering: bash 3.2's
+			# printf sign-extends "'<byte>" for bytes >= 0x80, and the stated
+			# contract is one uppercase %XX per byte.
+			printf -v _ss_ord '%d' "'$_ss_ch"
+			printf -v _ss_ch '%%%02X' "$((_ss_ord & 0xFF))"
 			_ss_out="${_ss_out}${_ss_ch}"
 			;;
 		esac
@@ -109,17 +117,37 @@ _ghjig_ss_refuse_unmeasurable() {
 	return 1
 }
 
+# _ghjig_ss_git_diff <args…> — every staged-diff read goes through here:
+# the pathspec-magic env family is neutralized for the child, because an
+# inherited GIT_*_PATHSPECS cell rewrites how the `:(literal)` pathspec
+# (and the enumeration it must agree with) is parsed — the measured object
+# is no more the environment's to rewrite than it is the clone config's
+# (§3.3's measurement-domain rule). Subshell form, bash-3.2-safe.
+_ghjig_ss_git_diff() {
+	(
+		unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+		exec git diff "$@"
+	)
+}
+
 # _ghjig_ss_scan_path <raw-path> — scan one staged path's added lines.
 # Reads the caller's _ss_base/_ss_n/_ss_ids/_ss_eres via dynamic scope.
 # Returns 0 (clean) or 1 (refused; the record is already emitted).
 _ghjig_ss_scan_path() {
 	local _ss_p="$1"
 	local _ss_num _ss_first _ss_add _ss_rest _ss_del
-	if ! _ss_num="$(git diff --cached --no-ext-diff --no-textconv --no-color --numstat "$_ss_base" -- ":(literal)$_ss_p" 2>/dev/null </dev/null)"; then
+	if ! _ss_num="$(_ghjig_ss_git_diff --cached --no-ext-diff --no-textconv --no-color --numstat "$_ss_base" -- ":(literal)$_ss_p" 2>/dev/null </dev/null)"; then
 		_ghjig_ss_refuse_unmeasurable "$_ss_p"
 		return 1
 	fi
-	[ -n "$_ss_num" ] || return 0
+	if [ -z "$_ss_num" ]; then
+		# The enumeration itself just listed this path, so an empty per-path
+		# numstat is a measurement the scan did not get — never evidence of
+		# no change. Vouching here would approve unmeasured (§3.9): any
+		# interference between the two reads lands as a loud refusal.
+		_ghjig_ss_refuse_unmeasurable "$_ss_p"
+		return 1
+	fi
 	# Binary is the numstat no-line-counts outcome: "-<TAB>-<TAB>..." (§3.10).
 	_ss_first="${_ss_num%%$'\n'*}"
 	_ss_add="${_ss_first%%$'\t'*}"
@@ -130,7 +158,7 @@ _ghjig_ss_scan_path() {
 		return 1
 	fi
 	local _ss_diff
-	if ! _ss_diff="$(git diff --cached --no-ext-diff --no-textconv --no-color -U0 "$_ss_base" -- ":(literal)$_ss_p" 2>/dev/null </dev/null)"; then
+	if ! _ss_diff="$(_ghjig_ss_git_diff --cached --no-ext-diff --no-textconv --no-color -U0 "$_ss_base" -- ":(literal)$_ss_p" 2>/dev/null </dev/null)"; then
 		_ghjig_ss_refuse_unmeasurable "$_ss_p"
 		return 1
 	fi
@@ -248,7 +276,7 @@ scan_staged_secrets() {
 			return 0
 		fi
 	fi
-	if ! git diff --cached --name-only -z "$_ss_base" >/dev/null 2>&1 </dev/null; then
+	if ! _ghjig_ss_git_diff --cached --name-only -z "$_ss_base" >/dev/null 2>&1 </dev/null; then
 		_ghjig_ss_disarm 'staged path enumeration failed'
 		return 0
 	fi
@@ -288,6 +316,6 @@ scan_staged_secrets() {
 		if [ "$_ss_skip" -eq 0 ]; then
 			_ghjig_ss_scan_path "$_ss_path" || return 1
 		fi
-	done < <(git diff --cached --name-only -z "$_ss_base" 2>/dev/null </dev/null)
+	done < <(_ghjig_ss_git_diff --cached --name-only -z "$_ss_base" 2>/dev/null </dev/null)
 	return 0
 }
