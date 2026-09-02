@@ -48,6 +48,7 @@ import {
 	closeSync,
 	constants,
 	existsSync,
+	linkSync,
 	mkdirSync,
 	mkdtempSync,
 	openSync,
@@ -62,7 +63,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 // The sink's name comes from the runtime itself: an arm that plants a symlink
 // or reads a mode has to address exactly the path the runtime appends to, so a
 // rename there moves the arm with it instead of quietly aiming it elsewhere.
@@ -285,9 +286,15 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// links — and §4.6 asks this comparison for RESOLVED PHYSICAL paths
 		// precisely because a symlinked component inside the fixture puts the
 		// performed act outside it while the textual form still reads as
-		// contained. Neither escape is reachable through today's
-		// `recoveryFor`, whose paths all pass through `join`/`dirname`, and no
-		// fixture here holds a link; the guard resolves both operands anyway,
+		// contained. A third vector stays unmodelled (§3.11): `physicalPath`
+		// collapses `..` TEXTUALLY before it walks, so a clause path shaped
+		// `<fixture>/<link>/../x` resolves here to `<fixture>/x` and is
+		// admitted, while the kernel traverses the link BEFORE applying `..`
+		// and acts somewhere the admitted form never names (issue #44,
+		// comment 2). None of the three is reachable through today's
+		// `recoveryFor`, whose paths all pass through `join`/`dirname` over
+		// an already-absolute root and carry no `..`, and no performing-arm
+		// fixture holds a link; the guard resolves both operands anyway,
 		// because a containment check that rests on a property of the fixture
 		// is the same defect as one resting on a property of the function it
 		// is guarding against, one level down.
@@ -396,6 +403,93 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		}
 	});
 
+	it("refuses a hard link at the sink path: the record must not land in an inode another name owns (§4.6, §5.5)", () => {
+		// `O_NOFOLLOW` refuses a symlink at the final component and cannot
+		// refuse a hard link — the link IS a regular file this account can
+		// append to, so the open succeeds, every record lands in an inode the
+		// planter chose and can read, and the append reports `true`, folding a
+		// clean `auditWritable` onto the durable registration entry (issue #44
+		// comment 1, measured on PR #42's head). The property the sink needs
+		// is that the opened inode carries exactly one name: `nlink === 1`,
+		// answered by `fstat` on the descriptor the open already returned.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-hardlink-"));
+		try {
+			const elsewhere = join(stateRoot, "elsewhere");
+			mkdirSync(elsewhere);
+			const victim = join(elsewhere, "captured.log");
+			writeFileSync(victim, "");
+			linkSync(victim, join(stateRoot, AUDIT_FILE_NAME));
+			const { value } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			assert.equal(
+				value,
+				false,
+				"an append into a hard-linked sink reported success: the caller records a clean auditWritable while the evidence rests in an inode another name owns and can rewrite",
+			);
+			assert.equal(
+				readFileSync(victim, "utf8"),
+				"",
+				"the audit record was written through the hard link into the victim inode: the evidence sink is redirectable, reached by link count where #40 closed the symlink form",
+			);
+		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a FIFO at the sink path instead of hanging the factory that appends at load (§3.9, §5.9)", {
+		skip: process.platform === "win32" ? "POSIX FIFO" : false,
+	}, () => {
+		// `O_NOFOLLOW` refuses a symlink, not a named pipe, and `openSync` on
+		// a FIFO with no reader blocks before any verdict can run: the append
+		// neither returns nor throws, so the extension factory calling it at
+		// load hangs where the `audit-append` posture row promises a warning
+		// and a `false` (issue #44). The append therefore runs in a child
+		// process under this arm's OWN bound — the issue's AC has the arm
+		// carry its bound rather than lean on the suite's — so the red run
+		// terminates: red is the child killed at the bound, no verdict printed.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-fifo-"));
+		execFileSync("mkfifo", [join(stateRoot, AUDIT_FILE_NAME)]);
+		const boundMs = 4000;
+		const script = [
+			"const { appendAuditRecord } = await import(process.argv[2]);",
+			'const value = appendAuditRecord(process.argv[1], { category: "test", action: "fifo", text: "evidence" });',
+			"console.log(`verdict=${value}`);",
+		].join("\n");
+		let killedBy: string | undefined;
+		let stdout = "";
+		try {
+			stdout = execFileSync(
+				process.execPath,
+				[
+					"--input-type=module",
+					"-e",
+					script,
+					stateRoot,
+					pathToFileURL(join(REPO_ROOT, ".pi", "extensions", "ghjig", "audit.ts")).href,
+				],
+				{ timeout: boundMs, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+			);
+		} catch (error) {
+			const failure = error as { signal?: string | null; status?: number | null; stdout?: string };
+			killedBy = failure.signal ?? `exit status ${failure.status}`;
+			stdout = failure.stdout ?? "";
+		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+		assert.equal(
+			killedBy,
+			undefined,
+			`the append against a reader-less FIFO did not return a verdict within this arm's ${boundMs}ms bound ` +
+				`(child ended by ${killedBy}; stdout: ${JSON.stringify(stdout)}): the extension factory calling it at ` +
+				`load hangs with no verdict and no signal a reader can act on, where the audit-append row degrades open`,
+		);
+		assert.match(
+			stdout,
+			/verdict=false/,
+			`the append accepted a FIFO at the sink path: a process holding the read end takes the evidence and the ` +
+				`gate reads nothing — the same write/read divergence #40 closed for symlinks (§4.6). child stdout: ${JSON.stringify(stdout)}`,
+		);
+	});
+
 	it("creates the sink readable only by the account that writes it (§5.5)", {
 		// POSIX permission bits. On a host that does not carry them the mode
 		// says nothing about who may read the file, so the arm measures nothing
@@ -418,6 +512,47 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		} finally {
 			process.umask(savedUmask);
 			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a sink whose mode admits group or other accounts, naming the chmod that restores it (§5.5, §3.11)", {
+		// POSIX permission bits. No superuser skip: the refusal under test is a
+		// verdict on the measured mode, not a permission failure the kernel
+		// waives for root.
+		skip: process.platform === "win32" ? "POSIX permission bits" : false,
+	}, () => {
+		// The `0600` create mode binds only at creation: a sink pre-created
+		// `0644` or `0666` keeps those bits, and today's append lands the
+		// record in it silently — the §5.5 owner-only read scope is off with
+		// no signal on any surface (issue #44 comment 1's named member). This
+		// shape is honest-mistake-reachable (a `touch` before first run
+		// suffices), so the refusal is owed a live recovery naming the exact
+		// act: `chmod 600` on the sink.
+		for (const mode of [0o644, 0o666]) {
+			const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-loose-mode-"));
+			try {
+				const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
+				writeFileSync(sinkPath, "");
+				chmodSync(sinkPath, mode);
+				const { value, warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+				assert.equal(
+					value,
+					false,
+					`a sink at mode ${mode.toString(8)} was appended into silently: the record at rest is readable by accounts the repository's work never concerned, and nothing on any surface says so`,
+				);
+				assert.match(
+					recoveryClause(warnings[0] ?? "") ?? "",
+					/chmod 600/,
+					`the refusal names no \`chmod 600\` on the sink — the one act that restores the trail here — so the signal leaves the operator without the live recovery this honest-mistake shape is owed (§3.11). warnings: ${JSON.stringify(warnings)}`,
+				);
+				assert.equal(
+					readFileSync(sinkPath, "utf8"),
+					"",
+					`the record landed in the group/other-readable sink despite the refusal: the verdict must bind before the write, not after it`,
+				);
+			} finally {
+				rmSync(stateRoot, { recursive: true, force: true });
+			}
 		}
 	});
 
