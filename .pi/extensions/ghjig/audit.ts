@@ -191,6 +191,15 @@ export interface SinkRefusal {
  * also fails would prescribe a dead act, so it is named only when the
  * mode is all that failed.
  *
+ * Both recovery clauses are COMMAND context — text the clause invites
+ * the operator to paste — so the path rides the `"shell"` delimiter of
+ * `quoted`, POSIX single quotes inside which a substitution-shaped
+ * component is bytes rather than an execution (issue #53). The cause
+ * keeps the JSON delimiter: it is read, never pasted, and the suite's
+ * clause reader decodes exactly that production. The §3.11 division
+ * stands unchanged — the cause stays content-free about the act, the
+ * recovery names the act and the path it lands on.
+ *
  * Where `process.geteuid` is absent (win32), the owner dimension is
  * unmeasurable in these terms and is SKIPPED rather than refused —
  * enumerated residual (§3.11): POSIX ownership does not model that
@@ -220,8 +229,8 @@ export function sinkRefusal(stats: Stats, sinkPath: string): SinkRefusal | undef
 		cause: `the sink at ${quoted(sinkPath)} was opened and refused before the write: ${failed.join("; ")}`,
 		recovery:
 			modeFailed && failed.length === 1
-				? `run \`chmod 600 ${quoted(sinkPath)}\`, then re-run — the record at rest is readable only by the account that writes it (§5.5).`
-				: `remove ${quoted(sinkPath)}, then re-run — the append recreates the sink as a plain 0600 file carrying exactly one name.`,
+				? `run \`chmod 600 ${quoted(sinkPath, "shell")}\`, then re-run — the record at rest is readable only by the account that writes it (§5.5).`
+				: `remove ${quoted(sinkPath, "shell")}, then re-run — the append recreates the sink as a plain 0600 file carrying exactly one name.`,
 	};
 }
 
