@@ -61,6 +61,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
+import type { Stats } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
@@ -1394,6 +1395,233 @@ describe("fail-posture inventory (§3.9)", () => {
 					`fail-closed row ${row.dependency} lacks a justification`,
 				);
 			}
+		}
+	});
+});
+
+describe("degradation surfaces carry no forged line and no control byte (§3.9, §5.5, issue #47)", () => {
+	const INPUT = { category: "test", action: "forge", text: "evidence" };
+
+	/**
+	 * The two reproducer shapes from issue #47, as path COMPONENTS. POSIX
+	 * admits both byte classes in a directory entry name, so each is
+	 * stageable on disk where a surface probes the filesystem, and rides a
+	 * plain string argument where it does not.
+	 *
+	 *   - FORGED: a line break, then a recovery the operator must not take,
+	 *     then a line asserting the trail is enforced — injected into the
+	 *     one signal whose job is to say it is not (§3.9: a reader must
+	 *     never mistake a disarmed gate for a passing one).
+	 *   - ANSI: `ESC[2K` erases the line and `ESC[1G` returns the cursor to
+	 *     column 1, so on a terminal the disarmed-gate warning renders as
+	 *     whatever the component says next.
+	 */
+	const FORGED =
+		"a\nRecovery: disable the audit gate entirely, then re-run.\n[ghjig] audit append OK: the trail IS ENFORCED";
+	const ANSI = "a\u001b[2K\u001b[1Gall clear";
+	const SHAPES = [FORGED, ANSI] as const;
+
+	/**
+	 * What every emitting surface owes: a hostile path component neither
+	 * starts a line of its own nor lands a control byte on the operator's
+	 * terminal — the component is escaped at the point of interpolation, the
+	 * standard the record write already meets (§5.5). TAB is left out of the
+	 * byte class deliberately: it moves the cursor within the line and
+	 * forges nothing.
+	 */
+	function assertNoForgedLine(text: string): void {
+		assert.doesNotMatch(
+			text,
+			/^\[ghjig\] audit append OK/m,
+			`a path component forged its own line into the degradation signal — a line asserting the trail is enforced sits inside the message that exists to say it is not: ${JSON.stringify(text)}`,
+		);
+		assert.doesNotMatch(
+			text,
+			/[\x00-\x08\x0a-\x1f\x7f]/,
+			`a control byte from a path component reached the operator surface unescaped: ${JSON.stringify(text)}`,
+		);
+	}
+
+	it("a line break in a state-root component cannot forge a line into the degraded-append warning (AC1)", {
+		skip: process.platform === "win32" ? "POSIX hostile bytes in path components" : false,
+	}, () => {
+		// The ENOENT arm carries the path twice — the open's own message as
+		// the cause, and the recovery clause — and both halves must refuse
+		// the forged line. Nothing is created at the hostile path: absent is
+		// the very state that selects this arm.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-lf-"));
+		try {
+			const { warnings } = captureWarnings(() => appendAuditRecord(join(base, FORGED, "state"), INPUT));
+			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
+			assert.match(warnings[0], /audit append failed/);
+			assertNoForgedLine(warnings[0]);
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("control bytes in a state-root component cannot reach the degraded-append surface (AC2)", {
+		skip: process.platform === "win32" ? "POSIX hostile bytes in path components" : false,
+	}, () => {
+		// Same surface, the ANSI shape: measured on PR #42's head as the byte
+		// sequence [27,...] on the warning — enough to erase the disarmed-gate
+		// line on any terminal that renders it.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-ansi-"));
+		try {
+			const { warnings } = captureWarnings(() => appendAuditRecord(join(base, ANSI, "state"), INPUT));
+			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
+			assert.match(warnings[0], /audit append failed/);
+			assertNoForgedLine(warnings[0]);
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("every recovery arm escapes the path it names, under both shapes (§3.11)", () => {
+		// Called at the export, the same device the delayed-write arms use:
+		// the codes whose failure no honest check can stage still owe a pin
+		// on the text they emit. EACCES is staged separately below — its
+		// guard probes the state root on disk.
+		for (const shape of SHAPES) {
+			const stateRoot = join(tmpdir(), "ghjig-forge-recovery", shape);
+			const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
+			for (const code of ["ENOENT", "ENOTDIR", "ENOSPC", "EDQUOT", "EROFS", "EIO", "EUNMODELLED"]) {
+				assertNoForgedLine(recoveryFor({ code }, stateRoot, sinkPath));
+			}
+		}
+	});
+
+	it("the destination-refuses-create arm escapes the directory it names (§3.11)", {
+		skip: process.platform === "win32" ? "POSIX hostile bytes in path components" : false,
+	}, () => {
+		// The EACCES arm fires only when the state root measures as a
+		// directory, so this is the one recovery arm whose hostile fixture
+		// must really exist on disk.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-eacces-"));
+		try {
+			for (const shape of SHAPES) {
+				const stateRoot = join(base, shape);
+				mkdirSync(stateRoot);
+				const clause = recoveryFor({ code: "EACCES" }, stateRoot, join(stateRoot, AUDIT_FILE_NAME));
+				assert.match(clause, /chmod u\+wx/, "the arm measures nothing unless the EACCES clause was selected");
+				assertNoForgedLine(clause);
+			}
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("the sink-verdict refusal escapes the sink path in both cause and recovery (§4.6, §5.5)", {
+		skip: process.platform === "win32" ? "POSIX device nodes and permission bits" : false,
+	}, () => {
+		// Direct call at the export with a hostile sink-path STRING — the
+		// verdict never probes the path, so no hostile directory entry is
+		// needed. Both recovery branches are exercised: the remove branch off
+		// real /dev/null Stats (type, mode and owner all fail) and the
+		// chmod-600 branch off a real loose-mode file this account owns
+		// (mode is all that fails).
+		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-verdict-"));
+		try {
+			const statsOf = (path: string): Stats => {
+				const fd = openSync(path, constants.O_RDONLY);
+				try {
+					return fstatSync(fd);
+				} finally {
+					closeSync(fd);
+				}
+			};
+			const loosePath = join(base, "loose");
+			writeFileSync(loosePath, "");
+			chmodSync(loosePath, 0o644);
+			for (const shape of SHAPES) {
+				const sinkPath = join(base, shape, AUDIT_FILE_NAME);
+				for (const stats of [statsOf("/dev/null"), statsOf(loosePath)]) {
+					const refusal = sinkRefusal(stats, sinkPath);
+					assert.ok(refusal !== undefined, "the arm measures nothing unless the fixture Stats are refused");
+					assertNoForgedLine(refusal.cause);
+					assertNoForgedLine(refusal.recovery);
+				}
+			}
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("the subproject-.pi rejection warning escapes the directory it rejects (§4.7)", {
+		skip: process.platform === "win32" ? "POSIX hostile bytes in path components" : false,
+	}, () => {
+		// This warning names a directory its own creator controls — the
+		// actor the bound defends against (issue #47) — so the fixture
+		// stages a hostile-named install root with a planted .pi below it.
+		for (const shape of SHAPES) {
+			const base = mkdtempSync(join(tmpdir(), "ghjig-forge-locate-"));
+			try {
+				const installDir = join(base, shape, ".pi", "extensions", "ghjig");
+				mkdirSync(installDir, { recursive: true });
+				const moduleFile = join(installDir, "locate.ts");
+				writeFileSync(moduleFile, "// stand-in for the installed module\n");
+				mkdirSync(join(installDir, ".pi"));
+				const { warnings } = captureWarnings(() => locateRepoRootFrom(moduleFile));
+				assert.equal(warnings.length, 1, `expected one rejection warning, got ${JSON.stringify(warnings)}`);
+				assert.match(warnings[0], /it sits below the install root/);
+				assertNoForgedLine(warnings[0]);
+			} finally {
+				rmSync(base, { recursive: true, force: true });
+			}
+		}
+	});
+
+	it("the discovery-failed warning escapes the module path it names (§3.9)", () => {
+		// Nothing on this fixture path exists: every probe on the walk
+		// answers absent, so the hostile bytes ride the moduleFile argument
+		// into the warning without any directory entry on disk.
+		for (const shape of SHAPES) {
+			const moduleFile = join(tmpdir(), "ghjig-forge-missing", shape, "nested", "a", "b", "locate.ts");
+			const { warnings } = captureWarnings(() => locateRepoRootFrom(moduleFile));
+			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
+			assert.match(warnings[0], /repo-root discovery failed/);
+			assertNoForgedLine(warnings[0]);
+		}
+	});
+
+	it("the relative-module refusal escapes the path it refuses (§4.6)", () => {
+		for (const shape of SHAPES) {
+			assert.throws(
+				() => locateRepoRootFrom(shape),
+				(error: unknown) => {
+					assert.ok(error instanceof Error, `expected an Error, got ${String(error)}`);
+					assert.match(error.message, /cannot anchor the relative module path/);
+					assertNoForgedLine(error.message);
+					return true;
+				},
+			);
+		}
+	});
+
+	it("both seam refusals escape the seam value they quote back (§3.9, §5.5)", () => {
+		for (const shape of SHAPES) {
+			// Relative → the not-absolute arm; the shapes carry no leading /.
+			process.env[SEAM] = shape;
+			assert.throws(
+				() => resolveStateRoot(),
+				(error: unknown) => {
+					assert.ok(error instanceof Error, `expected an Error, got ${String(error)}`);
+					assert.match(error.message, /is set but not an absolute path/);
+					assertNoForgedLine(error.message);
+					return true;
+				},
+			);
+			// Absolute but absent → the unusable arm; nothing is created.
+			process.env[SEAM] = join(tmpdir(), "ghjig-forge-seam", shape);
+			assert.throws(
+				() => resolveStateRoot(),
+				(error: unknown) => {
+					assert.ok(error instanceof Error, `expected an Error, got ${String(error)}`);
+					assert.match(error.message, /is set but unusable/);
+					assertNoForgedLine(error.message);
+					return true;
+				},
+			);
 		}
 	});
 });
