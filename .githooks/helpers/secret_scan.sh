@@ -325,6 +325,9 @@ scan_staged_secrets() {
 	if [ -f "$_ss_ign" ]; then
 		if [ -r "$_ss_ign" ]; then
 			while IFS= read -r _ss_line || [ -n "$_ss_line" ]; do
+				# Same CR strip as the pattern rows: a CRLF-edited list must
+				# excuse what it names, not fail-closed on an invisible byte.
+				_ss_line="${_ss_line%$'\r'}"
 				case "$_ss_line" in
 				'' | '#'*) continue ;;
 				esac

@@ -44,12 +44,18 @@ githook_source() {
   safe_source "$GHJIG_SHELL_HELPERS/$1" "${2:-git-hook-tier}"
 }
 
-# githook_require <function-name> — advisory-face guard. A helper file that
-# sourced cleanly but does not define the delegated function would
-# otherwise fail CLOSED at the call site (127 → a false block under a
-# wrong cause). If the function is absent, no-op the whole hook instead.
+# githook_require <function-name> [audit-category] — advisory-face guard.
+# A helper file that sourced cleanly but does not define the delegated
+# function would otherwise fail CLOSED at the call site (127 → a false
+# block under a wrong cause). If the function is absent, no-op the hook
+# from this point — but never silently: the fold leaves one warn record
+# naming what was missing (a sourced-clean stub is the one degradation
+# shape safe_source cannot see).
 githook_require() {
-  command -v "$1" >/dev/null 2>&1 || exit 0
+  if ! command -v "$1" >/dev/null 2>&1; then
+    ( audit_log warn "${2:-git-hook-tier}" require-missing "$1" ) >/dev/null 2>&1 || true
+    exit 0
+  fi
 }
 
 # githook_block <category> <message> — emit a clear stderr line, best-effort

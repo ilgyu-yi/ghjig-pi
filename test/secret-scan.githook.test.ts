@@ -932,6 +932,57 @@ describe("boundary pins — green in both tree states (issue #66)", { skip: IS_W
 		}
 	});
 
+	it("a branch helper that sources cleanly but defines nothing degrades loudly, never silently", () => {
+		// The stub shape satisfies safe_source, so the only possible signal
+		// is the require guard's own record: folding open from this arm on
+		// is the tier's contract, but a fold with ZERO records is not —
+		// §3.9's degradation-signal rule binds the require miss too.
+		const fixture = buildGithookFixture({
+			helpersRelative: "helpers-bguard-stub",
+			remote: { defaultBranch: PROTECTED },
+		});
+		try {
+			fixtureGit(fixture, ["checkout", "-q", "-b", FEATURE]);
+			writeFileSync(
+				join(fixture.helpersDir, "branch_guard.sh"),
+				"# stub helper: sources cleanly, defines none of the delegated functions\n",
+			);
+			// Every OTHER helper is the real one: the binding is complete but
+			// for the stubbed branch guard, so the one warn below is the
+			// require guard's own record, not a neighbouring hook's noise.
+			cpSync(
+				join(repoRoot(), ".githooks", "helpers", "secret_scan.sh"),
+				join(fixture.helpersDir, "secret_scan.sh"),
+			);
+			cpSync(
+				join(repoRoot(), ".githooks", "helpers", "conventional_commit.sh"),
+				join(fixture.helpersDir, "conventional_commit.sh"),
+			);
+			stageFile(fixture, "zqleakbstub.txt", AWS_SECRET + "\n");
+			const attempt = commitWithMessage(fixture, "chore: exercise the silent-stub arm\n");
+			assert.equal(attempt.status, 0, `stub branch helper: the fold-open contract broke: ${attempt.stderr}`);
+			assert.doesNotMatch(
+				attempt.auditDelta,
+				/\bblock\b/,
+				`stub branch helper: a degraded arm appended a block record; delta: ${JSON.stringify(attempt.auditDelta)}`,
+			);
+			const warns = attempt.auditDelta.split("\n").filter((line) => /^warn\b/.test(line));
+			assert.equal(
+				warns.length,
+				1,
+				`stub branch helper: expected exactly one warn record for the silent fold (§3.9's ` +
+					`degradation-signal rule); delta: ${JSON.stringify(attempt.auditDelta)}`,
+			);
+			assert.match(
+				warns[0],
+				/\brequire-missing\b/,
+				"stub branch helper: the degradation record does not name the require miss",
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
 	it("the secret arm's block message is a non-interpolating constant (re-pin, structural)", () => {
 		// The adapter's secret-arm message is already a constant and the
 		// arming commit re-pins rather than rewrites it; `githook_block`
