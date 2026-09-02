@@ -346,6 +346,13 @@ describe("W3 — the draft-sleep condition in the gate step", () => {
  * separates the two states for a reader. Neither the trigger assertions nor
  * the condition assertions above notice its removal: a sleep branch stripped
  * of both lines is still a correctly-guarded sleep, and silently a pass.
+ *
+ * One adjacent shape is left unpinned by decision, not oversight: a
+ * disclosure nested inside an inner block WITHIN the branch (an inner
+ * conditional the sleep never takes) still matches both assertions below,
+ * because they match text and the header's item 4 already disclaims
+ * evaluating any shell in this file. Pinning it would need dataflow the
+ * report-only contract above excludes.
  */
 describe("W6 — the sleep's disclosure", () => {
 	/**
@@ -356,6 +363,14 @@ describe("W6 — the sleep's disclosure", () => {
 	 * and a green suite: the exact shape this block's header says it catches.
 	 * A `/g` regex carries `lastIndex` between calls, so the source is re-wrapped
 	 * rather than `.test()`-ed directly.
+	 *
+	 * When no `fi` sits at the guard's own indentation — a branch collapsed to
+	 * one physical line has none — the locator REFUSES with the empty string
+	 * rather than widening to the end of the step. §3.9: a predicate that
+	 * cannot measure its subject refuses; the end-of-step fallback is the
+	 * unbounded slice the `fi` bound exists to remove, and under it a
+	 * disclosure relocated into the enforcing path still satisfies both
+	 * assertions while the sleep itself says nothing.
 	 */
 	const sleepBranch = (): string => {
 		const lines = shellLines(validateStep());
@@ -368,8 +383,12 @@ describe("W6 — the sleep's disclosure", () => {
 		const end = lines.findIndex(
 			(line, i) => i > start && /^\s*fi\s*$/.test(line) && indentOf(line) === opensAt,
 		);
-		return lines.slice(start, end === -1 ? lines.length : end).join("\n");
+		return end === -1 ? "" : lines.slice(start, end).join("\n");
 	};
+
+	it("bounds the branch at a fi on the guard's own indentation, refusing an unclosable slice", () => {
+		assert.notEqual(sleepBranch(), "");
+	});
 
 	it("warns on the surface a merge decision reads", () => {
 		assert.match(sleepBranch(), /::warning::/);
