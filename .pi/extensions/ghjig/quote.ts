@@ -11,14 +11,22 @@
  * double contract:
  *
  *   - it ESCAPES: a line feed becomes the two characters backslash-n,
- *     the ESC byte becomes the six characters backslash-u001b, so no
- *     component can start a line of its own or land a control byte on
- *     the operator's terminal — the standard the record write already
+ *     the ESC byte becomes the six characters backslash-u001b — and the
+ *     classes `JSON.stringify` leaves raw are closed by a post-pass:
+ *     DEL and the C1 controls (U+007F–U+009F, holding NEL the line
+ *     break and U+009B the one-byte CSI), the LINE/PARAGRAPH
+ *     SEPARATORS (U+2028/U+2029), and the bidi controls (U+200E,
+ *     U+200F, U+202A–U+202E, U+2066–U+2069) all render as
+ *     backslash-u escapes. So no component can start a line of its
+ *     own, land a control byte on the operator's terminal, or reorder
+ *     how the signal displays — the standard the record write already
  *     meets at the sink (§5.5: any free text encoded at write time);
  *   - it DELIMITS: the quotes mark the value's exact extent, for the
  *     operator pasting a recovery act into a shell and for the suite's
  *     clause reader alike — whitespace inside the value no longer reads
- *     as the value's end.
+ *     as the value's end. Delimitation is extent-marking only, not
+ *     shell-neutralization: dollar, backtick and backslash stay live
+ *     inside POSIX double quotes when the value is pasted as-is.
  *
  * One named helper rather than `JSON.stringify` at each site because the
  * structural lock (`test/warning-surface.structure.test.ts`) needs one
@@ -30,5 +38,13 @@
 
 /** The escaped, quote-delimited rendering of `value` — see the header. */
 export function quoted(value: string): string {
-	return JSON.stringify(value);
+	// `JSON.stringify` escapes C0 but emits DEL, the C1 range, the
+	// line/paragraph separators and the bidi controls raw (all are valid
+	// JSON string content); the post-pass closes those classes. Each
+	// escape it emits is itself valid JSON-string syntax, so the output
+	// still parses as the JSON string the clause reader decodes.
+	return JSON.stringify(value).replace(
+		/[\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/g,
+		(raw) => `\\u${raw.codePointAt(0)?.toString(16).padStart(4, "0")}`,
+	);
 }

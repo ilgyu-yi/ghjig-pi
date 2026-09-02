@@ -1373,8 +1373,8 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 	const INPUT = { category: "test", action: "forge", text: "evidence" };
 
 	/**
-	 * The two reproducer shapes from issue #47, as path COMPONENTS. POSIX
-	 * admits both byte classes in a directory entry name, so each is
+	 * The reproducer shapes from issue #47, as path COMPONENTS. POSIX
+	 * admits every byte class here in a directory entry name, so each is
 	 * stageable on disk where a surface probes the filesystem, and rides a
 	 * plain string argument where it does not.
 	 *
@@ -1385,19 +1385,31 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 	 *   - ANSI: `ESC[2K` erases the line and `ESC[1G` returns the cursor to
 	 *     column 1, so on a terminal the disarmed-gate warning renders as
 	 *     whatever the component says next.
+	 *   - C1: what the raw `JSON.stringify` never escaped (issue #47,
+	 *     round 1) — NEL (U+0085, a line break on NEL-honouring
+	 *     terminals), LINE SEPARATOR (U+2028, a JavaScript line
+	 *     terminator, so the forged line after it anchors the multiline
+	 *     regex below), then the forged enforced-line, the 8-bit CSI
+	 *     (U+009B, the one-byte form of ESC-bracket, so U+009B `2K`
+	 *     erases the line where the two-byte form does), DEL (U+007F),
+	 *     and RLO (U+202E, a bidi override that reverses how everything
+	 *     after it renders — terminals do not treat bidi controls as
+	 *     line-breaking, so it is pinned by raw presence, not forgery).
 	 */
 	const FORGED =
 		"a\nRecovery: disable the audit gate entirely, then re-run.\n[ghjig] audit append OK: the trail IS ENFORCED";
 	const ANSI = "a\u001b[2K\u001b[1Gall clear";
-	const SHAPES = [FORGED, ANSI] as const;
+	const C1 = "a\u0085\u2028[ghjig] audit append OK: the trail IS ENFORCED\u009b2K\u007f\u202eall clear";
+	const SHAPES = [FORGED, ANSI, C1] as const;
 
 	/**
 	 * What every emitting surface owes: a hostile path component neither
 	 * starts a line of its own nor lands a control byte on the operator's
 	 * terminal — the component is escaped at the point of interpolation, the
-	 * standard the record write already meets (§5.5). TAB is left out of the
-	 * byte class deliberately: it moves the cursor within the line and
-	 * forges nothing.
+	 * standard the record write already meets (§5.5) — the byte class
+	 * covers C0, DEL and the C1 range, and a second class refuses raw bidi
+	 * controls and the U+2028/U+2029 separators. TAB is left out
+	 * deliberately: it moves the cursor within the line and forges nothing.
 	 */
 	function assertNoForgedLine(text: string): void {
 		assert.doesNotMatch(
@@ -1407,8 +1419,13 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 		);
 		assert.doesNotMatch(
 			text,
-			/[\x00-\x08\x0a-\x1f\x7f]/,
+			/[\x00-\x08\x0a-\x1f\x7f-\x9f]/,
 			`a control byte from a path component reached the operator surface unescaped: ${JSON.stringify(text)}`,
+		);
+		assert.doesNotMatch(
+			text,
+			/[\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/,
+			`a bidi control or line/paragraph separator from a path component reached the operator surface raw — it reorders or breaks how the signal renders without ever matching a byte-class check: ${JSON.stringify(text)}`,
 		);
 	}
 
