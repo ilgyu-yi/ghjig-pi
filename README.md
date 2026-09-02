@@ -8,7 +8,18 @@ Active development under the contract in [`SPEC.md`](SPEC.md).
 
 ## Getting started
 
-<How to build / run / test. Fill in once the project takes shape.>
+There is no build step — the tree ships TypeScript sources that run directly. Two prerequisites:
+
+- [`pi`](https://github.com/earendil-works/pi) available on `PATH` — the suite drives the real binary against disposable fixtures.
+- A Node.js runtime with native TypeScript type-stripping.
+
+Run the verification suite as:
+
+```sh
+node --test "test/*.test.ts"
+```
+
+Keep the glob quoted, and do not run a bare `node --test`: node's default discovery treats every file under `test/` as a test and executes the harness assets themselves, so that shape false-reds on a harness asset instead of measuring the runtime. The harness's own contract stays with its author-side home, the header of [`test/harness/run-pi.ts`](test/harness/run-pi.ts).
 
 ## Documentation
 
