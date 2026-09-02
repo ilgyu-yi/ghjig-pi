@@ -48,6 +48,7 @@ import {
 	closeSync,
 	constants,
 	existsSync,
+	fstatSync,
 	linkSync,
 	mkdirSync,
 	mkdtempSync,
@@ -67,7 +68,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // The sink's name comes from the runtime itself: an arm that plants a symlink
 // or reads a mode has to address exactly the path the runtime appends to, so a
 // rename there moves the arm with it instead of quietly aiming it elsewhere.
-import { appendAuditRecord, AUDIT_FILE_NAME, recoveryFor, writeRecordLine } from "../.pi/extensions/ghjig/audit.ts";
+import {
+	appendAuditRecord,
+	AUDIT_FILE_NAME,
+	recoveryFor,
+	sinkRefusal,
+	writeRecordLine,
+} from "../.pi/extensions/ghjig/audit.ts";
 import { locateRepoRoot, locateRepoRootFrom } from "../.pi/extensions/ghjig/locate.ts";
 import { POSTURES } from "../.pi/extensions/ghjig/postures.ts";
 import { resolveStateRoot } from "../.pi/extensions/ghjig/state-root.ts";
@@ -556,6 +563,121 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		}
 	});
 
+	it("refuses a hard link whose every other dimension passes: the link count alone is the verdict (§3.12, §4.6)", {
+		skip: process.platform === "win32" ? "POSIX permission bits" : false,
+	}, () => {
+		// The hard-link arm above stages its victim at the umask's default
+		// mode, so a verdict that lost its link-count check is still refused
+		// there — by the mode dimension — and the arm stays green (measured:
+		// deleting the `nlink` check left the whole suite passing). This arm
+		// is the one the mutation priority owes the link count: the victim is
+		// a regular 0600 file owned by this account, so the opened inode
+		// fails nothing but `nlink`, and a green here with the check deleted
+		// is impossible.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-hardlink-0600-"));
+		try {
+			const elsewhere = join(stateRoot, "elsewhere");
+			mkdirSync(elsewhere);
+			const victim = join(elsewhere, "captured.log");
+			writeFileSync(victim, "");
+			chmodSync(victim, 0o600);
+			linkSync(victim, join(stateRoot, AUDIT_FILE_NAME));
+			const { value, warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
+			assert.equal(
+				value,
+				false,
+				"a hard-linked sink passing every dimension but the link count was appended into: the verdict rests on mode or type, and a planter links an owner-0600 file precisely to pass them",
+			);
+			assert.match(
+				warnings[0] ?? "",
+				/2 names/,
+				`the refusal does not name the link count, the only dimension that failed here. warnings: ${JSON.stringify(warnings)}`,
+			);
+			assert.equal(
+				readFileSync(victim, "utf8"),
+				"",
+				"the audit record landed in the victim inode despite the refusal: the verdict must bind before the write",
+			);
+		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a character device and another account's inode, pinned at the seam against real /dev/null Stats (§3.12, §4.6, §5.5)", {
+		skip: process.platform === "win32" ? "POSIX device nodes and ownership" : false,
+	}, () => {
+		// The owner and character-device dimensions of the sink verdict are
+		// not stageable AT THE SINK PATH without root: chown to another
+		// account and mknod both need root, and link(2) from devfs into a
+		// fixture is cross-device (§3.12). So they are pinned at the seam the
+		// append calls — the exported verdict — against real `fstat` Stats of
+		// one real kernel object, /dev/null: a character device, owned by
+		// root, mode 0666, exercising the type, owner, and mode dimensions in
+		// one Stats object. The verdict enumerates every failing dimension
+		// rather than stopping at the first, which is what lets this one
+		// unforgeable object discriminate a dropped check in any of the three.
+		const fd = openSync("/dev/null", constants.O_RDONLY);
+		let stats;
+		try {
+			stats = fstatSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+		const refusal = sinkRefusal(stats, "/dev/null");
+		assert.ok(
+			refusal !== undefined,
+			"the verdict admits /dev/null — a character device readable and writable by every account on the host: evidence appended there is world-readable and never at rest",
+		);
+		assert.match(
+			refusal.cause,
+			/not a regular file/,
+			`the refusal does not carry the type dimension: a character device at the sink path is refused for its mode alone, so a 0600 device would be admitted. cause: ${refusal.cause}`,
+		);
+		assert.match(
+			refusal.cause,
+			/admits group or other/,
+			`the refusal does not carry the mode dimension measured off the same Stats. cause: ${refusal.cause}`,
+		);
+		if (process.geteuid?.() !== 0 && stats.uid === 0) {
+			assert.match(
+				refusal.cause,
+				/owned by uid 0/,
+				`the refusal does not carry the owner dimension: root's inode at the sink path is refused for its type alone, so another account's regular file would be admitted. cause: ${refusal.cause}`,
+			);
+		}
+		assert.doesNotMatch(
+			refusal.recovery,
+			/chmod 600/,
+			`the recovery names \`chmod 600\` on a path whose type dimension also failed — a dead act where the object to repair is the device itself (§3.11). recovery: ${refusal.recovery}`,
+		);
+	});
+
+	it("admits through the verdict exactly the sink the append itself creates (§3.12)", {
+		skip: process.platform === "win32" ? "POSIX permission bits" : false,
+	}, () => {
+		// A verdict that refuses everything contains nothing: the counterpart
+		// of the /dev/null pin is that the Stats of a sink the append just
+		// created — regular, one name, 0600, this account — pass it.
+		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-verdict-pass-"));
+		try {
+			assert.equal(captureWarnings(() => appendAuditRecord(stateRoot, INPUT)).value, true);
+			const fd = openSync(join(stateRoot, AUDIT_FILE_NAME), constants.O_RDONLY);
+			let stats;
+			try {
+				stats = fstatSync(fd);
+			} finally {
+				closeSync(fd);
+			}
+			assert.equal(
+				sinkRefusal(stats, join(stateRoot, AUDIT_FILE_NAME)),
+				undefined,
+				"the verdict refuses the very sink the append creates: every append after the first degrades open",
+			);
+		} finally {
+			rmSync(stateRoot, { recursive: true, force: true });
+		}
+	});
+
 	it("names a recovery in the degraded-append signal (§3.11)", () => {
 		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-signal-"));
 		try {
@@ -847,10 +969,11 @@ describe("audit primitive: the record write is all-or-raise (§3.12)", () => {
 		skip: process.platform === "win32" ? "POSIX FIFO" : false,
 	}, () => {
 		// The property is "cannot return without writing everything". Through
-		// appendAuditRecord it is unstageable — that descriptor is always
-		// blocking, and no test host fills a filesystem mid-write (§3.12) — so
-		// it is measured at the seam the append calls, on a NON-BLOCKING
-		// descriptor, where a short write is one call away. One `write(2)` in
+		// appendAuditRecord it is unstageable — only a regular file survives
+		// the sink verdict, `O_NONBLOCK` has no effect on regular-file
+		// write(2), and no test host fills a filesystem mid-write (§3.12) — so
+		// it is measured at the seam the append calls, on a non-blocking
+		// PIPE descriptor, where a short write is one call away. One `write(2)` in
 		// place of the fd form returns the short count as a success; the fd
 		// form raises instead, and that raise is the whole difference.
 		//
