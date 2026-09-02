@@ -37,6 +37,7 @@
 import { statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { locateRepoRoot } from "./locate.ts";
+import { quoted } from "./quote.ts";
 
 /** The single test-only override seam — the runtime's only env read. */
 export const STATE_SEAM = "GHJIG_TEST_STATE_ROOT";
@@ -74,13 +75,13 @@ export function resolveStateRoot(): StateRootResolution {
 	if (!isAbsolute(seam)) {
 		throw new Error(
 			`[ghjig] ${STATE_SEAM} is set but not an absolute path ` +
-				`(${seam === "" ? "empty value" : seam}): refusing the run — ` +
+				`(${seam === "" ? "empty value" : quoted(seam)}): refusing the run — ` +
 				`no fallback toward the operational state root (§3.9, §5.5). ${RECOVERY}`,
 		);
 	}
 	if (!isDirectory(seam)) {
 		throw new Error(
-			`[ghjig] ${STATE_SEAM} is set but unusable (${seam} is not a directory this account can ` +
+			`[ghjig] ${STATE_SEAM} is set but unusable (${quoted(seam)} is not a directory this account can ` +
 				`measure — missing, not a directory, or refused): ` +
 				`refusing the run — no fallback toward the operational state root (§3.9, §5.5). ${RECOVERY}`,
 		);

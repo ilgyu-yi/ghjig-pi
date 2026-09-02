@@ -61,6 +61,7 @@ import {
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
+import type { Stats } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
@@ -191,28 +192,6 @@ describe("audit primitive: one-line encoded records (§5.5)", () => {
 describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", () => {
 	const INPUT = { category: "test", action: "sink", text: "evidence" };
 
-	/**
-	 * The clause reader below delimits a path at whitespace, so on a host
-	 * whose temporary directory carries whitespace it reads a TRUNCATED
-	 * path — and the arms that perform what a clause names then either act
-	 * on something the fixture does not own or refuse a clause production
-	 * emitted correctly. Both are results about the host, not about the
-	 * code under test (§3.12), so those arms measure nothing here and say
-	 * so rather than reporting a red the clause did not earn.
-	 *
-	 * Widening the reader is not the fix available: the whitespace IS the
-	 * only signal saying where the path production named ends, and ending
-	 * it instead at whatever happens to exist on disk would repair the
-	 * clause toward what the arm hoped to read — the one move these arms
-	 * exist to refuse. Delimiting the path in the production message would
-	 * fix it at the source, for the operator pasting it into a shell as
-	 * much as for this reader; that is a change to operator-facing text
-	 * and is not made here.
-	 */
-	const CLAUSE_PATH_UNREADABLE: string | false = /\s/.test(tmpdir())
-		? "the fixture base path carries whitespace, which the recovery-clause reader cannot delimit"
-		: false;
-
 	/** The recovery clause of a degradation signal, if the signal carries one. */
 	function recoveryClause(warning: string): string | undefined {
 		return /Recovery:\s*(.+)$/s.exec(warning)?.[1];
@@ -223,12 +202,15 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	 * rather than matching its prose needs one machine-readable handle on
 	 * it, and a clause naming the wrong object is exactly what these arms
 	 * are for: the handle is read raw, never repaired toward whatever the
-	 * arm was hoping for. Absolute-path shape is POSIX here; a host with
-	 * another path grammar needs this reader widened, not the contract.
+	 * arm was hoping for. Every clause delimits the path it names as a
+	 * JSON string (`quoted()` at the source, issue #47), so the handle is
+	 * the clause's first JSON-string production, decoded — the quotes say
+	 * exactly where the path ends, which is what lets these arms run on a
+	 * host whose temporary directory carries whitespace.
 	 */
 	function pathNamedIn(clause: string): string | undefined {
-		const found = /(\/[^\s'"`]+)/.exec(clause)?.[1];
-		return found === undefined ? undefined : found.replace(/[.,;:)'"`]+$/, "");
+		const found = /"(?:[^"\\]|\\.)*"/.exec(clause)?.[0];
+		return found === undefined ? undefined : (JSON.parse(found) as string);
 	}
 
 	/**
@@ -693,9 +675,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		}
 	});
 
-	it("names a recovery that is live at this surface: performing it restores the trail (§3.11)", {
-		skip: CLAUSE_PATH_UNREADABLE,
-	}, () => {
+	it("names a recovery that is live at this surface: performing it restores the trail (§3.11)", () => {
 		// Asserted by running the recovery, not by matching its prose: the arm
 		// creates the destination the signal names and appends again. A signal
 		// naming a recovery that does not restore the trail is worse than one
@@ -726,9 +706,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		}
 	});
 
-	it("names a live recovery when an ancestor of the destination is a plain file (§3.11)", {
-		skip: CLAUSE_PATH_UNREADABLE,
-	}, () => {
+	it("names a live recovery when an ancestor of the destination is a plain file (§3.11)", () => {
 		// `<repo>/.ghjig` existing as a file is an honest mistake, not a hostile
 		// one, so this arm is owed a live recovery. Nothing can be created
 		// beneath a plain file, so a clause naming the sink path prescribes an
@@ -768,12 +746,11 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// superuser the directory refuses nothing, so the arm would measure the
 		// message against a failure that never occurred.
 		skip:
-			CLAUSE_PATH_UNREADABLE ||
-			(process.platform === "win32"
+			process.platform === "win32"
 				? "POSIX permission bits"
 				: process.getuid?.() === 0
 					? "the directory mode refuses nothing for this account"
-					: false),
+					: false,
 	}, () => {
 		// `.ghjig/state` created with restrictive permissions is an honest
 		// mistake. The sink does not exist and cannot be created, so a clause
@@ -807,17 +784,12 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	});
 
 	it("keeps the destination-mode recovery off the unsearchable-ancestor shape (§3.11)", {
-		// The whitespace condition is disqualifying here for the opposite
-		// reason to the performing arms: a truncated parse makes this arm's
-		// `notEqual` pass on any clause at all, so it would report a green it
-		// did not measure.
 		skip:
-			CLAUSE_PATH_UNREADABLE ||
-			(process.platform === "win32"
+			process.platform === "win32"
 				? "POSIX permission bits"
 				: process.getuid?.() === 0
 					? "the directory mode refuses nothing for this account"
-					: false),
+					: false,
 	}, () => {
 		// An ANCESTOR of the destination refuses the search, so the destination
 		// cannot be measured at all — and its own mode already admits this
@@ -848,12 +820,11 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 
 	it("names a live recovery when the sink's own mode refuses the append (§3.11)", {
 		skip:
-			CLAUSE_PATH_UNREADABLE ||
-			(process.platform === "win32"
+			process.platform === "win32"
 				? "POSIX permission bits"
 				: process.getuid?.() === 0
 					? "the sink mode refuses nothing for this account"
-					: false),
+					: false,
 	}, () => {
 		// The destination directory admits this account and the sink is there:
 		// only the sink's own mode refuses. The live object is that file, and a
@@ -1394,6 +1365,250 @@ describe("fail-posture inventory (§3.9)", () => {
 					`fail-closed row ${row.dependency} lacks a justification`,
 				);
 			}
+		}
+	});
+});
+
+describe("degradation surfaces carry no forged line and no control byte (§3.9, §5.5, issue #47)", () => {
+	const INPUT = { category: "test", action: "forge", text: "evidence" };
+
+	/**
+	 * The reproducer shapes from issue #47, as path COMPONENTS. POSIX
+	 * admits every byte class here in a directory entry name, so each is
+	 * stageable on disk where a surface probes the filesystem, and rides a
+	 * plain string argument where it does not.
+	 *
+	 *   - FORGED: a line break, then a recovery the operator must not take,
+	 *     then a line asserting the trail is enforced — injected into the
+	 *     one signal whose job is to say it is not (§3.9: a reader must
+	 *     never mistake a disarmed gate for a passing one).
+	 *   - ANSI: `ESC[2K` erases the line and `ESC[1G` returns the cursor to
+	 *     column 1, so on a terminal the disarmed-gate warning renders as
+	 *     whatever the component says next.
+	 *   - C1: what the raw `JSON.stringify` never escaped (issue #47,
+	 *     round 1) — NEL (U+0085, a line break on NEL-honouring
+	 *     terminals), LINE SEPARATOR (U+2028, a JavaScript line
+	 *     terminator, so the forged line after it anchors the multiline
+	 *     regex below), then the forged enforced-line, the 8-bit CSI
+	 *     (U+009B, the one-byte form of ESC-bracket, so U+009B `2K`
+	 *     erases the line where the two-byte form does), DEL (U+007F),
+	 *     and RLO (U+202E, a bidi override that reverses how everything
+	 *     after it renders — terminals do not treat bidi controls as
+	 *     line-breaking, so it is pinned by raw presence, not forgery).
+	 */
+	const FORGED =
+		"a\nRecovery: disable the audit gate entirely, then re-run.\n[ghjig] audit append OK: the trail IS ENFORCED";
+	const ANSI = "a\u001b[2K\u001b[1Gall clear";
+	const C1 = "a\u0085\u2028[ghjig] audit append OK: the trail IS ENFORCED\u009b2K\u007f\u202eall clear";
+	const SHAPES = [FORGED, ANSI, C1] as const;
+
+	/**
+	 * What every emitting surface owes: a hostile path component neither
+	 * starts a line of its own nor lands a control byte on the operator's
+	 * terminal — the component is escaped at the point of interpolation, the
+	 * standard the record write already meets (§5.5) — the byte class
+	 * covers C0, DEL and the C1 range, and a second class refuses raw bidi
+	 * controls and the U+2028/U+2029 separators. TAB is left out
+	 * deliberately: it moves the cursor within the line and forges nothing.
+	 */
+	function assertNoForgedLine(text: string): void {
+		assert.doesNotMatch(
+			text,
+			/^\[ghjig\] audit append OK/m,
+			`a path component forged its own line into the degradation signal — a line asserting the trail is enforced sits inside the message that exists to say it is not: ${JSON.stringify(text)}`,
+		);
+		assert.doesNotMatch(
+			text,
+			/[\x00-\x08\x0a-\x1f\x7f-\x9f]/,
+			`a control byte from a path component reached the operator surface unescaped: ${JSON.stringify(text)}`,
+		);
+		assert.doesNotMatch(
+			text,
+			/[\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/,
+			`a bidi control or line/paragraph separator from a path component reached the operator surface raw — it reorders or breaks how the signal renders without ever matching a byte-class check: ${JSON.stringify(text)}`,
+		);
+	}
+
+	it("a line break in a state-root component cannot forge a line into the degraded-append warning (AC1)", {
+		skip: process.platform === "win32" ? "POSIX hostile bytes in path components" : false,
+	}, () => {
+		// The ENOENT arm carries the path twice — the open's own message as
+		// the cause, and the recovery clause — and both halves must refuse
+		// the forged line. Nothing is created at the hostile path: absent is
+		// the very state that selects this arm.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-lf-"));
+		try {
+			const { warnings } = captureWarnings(() => appendAuditRecord(join(base, FORGED, "state"), INPUT));
+			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
+			assert.match(warnings[0], /audit append failed/);
+			assertNoForgedLine(warnings[0]);
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("control bytes in a state-root component cannot reach the degraded-append surface (AC2)", {
+		skip: process.platform === "win32" ? "POSIX hostile bytes in path components" : false,
+	}, () => {
+		// Same surface, the ANSI shape: measured on PR #42's head as the byte
+		// sequence [27,...] on the warning — enough to erase the disarmed-gate
+		// line on any terminal that renders it.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-ansi-"));
+		try {
+			const { warnings } = captureWarnings(() => appendAuditRecord(join(base, ANSI, "state"), INPUT));
+			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
+			assert.match(warnings[0], /audit append failed/);
+			assertNoForgedLine(warnings[0]);
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("every recovery arm escapes the path it names, under both shapes (§3.11)", () => {
+		// Called at the export, the same device the delayed-write arms use:
+		// the codes whose failure no honest check can stage still owe a pin
+		// on the text they emit. EACCES is staged separately below — its
+		// guard probes the state root on disk.
+		for (const shape of SHAPES) {
+			const stateRoot = join(tmpdir(), "ghjig-forge-recovery", shape);
+			const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
+			for (const code of ["ENOENT", "ENOTDIR", "ENOSPC", "EDQUOT", "EROFS", "EIO", "EUNMODELLED"]) {
+				assertNoForgedLine(recoveryFor({ code }, stateRoot, sinkPath));
+			}
+		}
+	});
+
+	it("the destination-refuses-create arm escapes the directory it names (§3.11)", {
+		skip: process.platform === "win32" ? "POSIX hostile bytes in path components" : false,
+	}, () => {
+		// The EACCES arm fires only when the state root measures as a
+		// directory, so this is the one recovery arm whose hostile fixture
+		// must really exist on disk.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-eacces-"));
+		try {
+			for (const shape of SHAPES) {
+				const stateRoot = join(base, shape);
+				mkdirSync(stateRoot);
+				const clause = recoveryFor({ code: "EACCES" }, stateRoot, join(stateRoot, AUDIT_FILE_NAME));
+				assert.match(clause, /chmod u\+wx/, "the arm measures nothing unless the EACCES clause was selected");
+				assertNoForgedLine(clause);
+			}
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("the sink-verdict refusal escapes the sink path in both cause and recovery (§4.6, §5.5)", {
+		skip: process.platform === "win32" ? "POSIX device nodes and permission bits" : false,
+	}, () => {
+		// Direct call at the export with a hostile sink-path STRING — the
+		// verdict never probes the path, so no hostile directory entry is
+		// needed. Both recovery branches are exercised: the remove branch off
+		// real /dev/null Stats (type, mode and owner all fail) and the
+		// chmod-600 branch off a real loose-mode file this account owns
+		// (mode is all that fails).
+		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-verdict-"));
+		try {
+			const statsOf = (path: string): Stats => {
+				const fd = openSync(path, constants.O_RDONLY);
+				try {
+					return fstatSync(fd);
+				} finally {
+					closeSync(fd);
+				}
+			};
+			const loosePath = join(base, "loose");
+			writeFileSync(loosePath, "");
+			chmodSync(loosePath, 0o644);
+			for (const shape of SHAPES) {
+				const sinkPath = join(base, shape, AUDIT_FILE_NAME);
+				for (const stats of [statsOf("/dev/null"), statsOf(loosePath)]) {
+					const refusal = sinkRefusal(stats, sinkPath);
+					assert.ok(refusal !== undefined, "the arm measures nothing unless the fixture Stats are refused");
+					assertNoForgedLine(refusal.cause);
+					assertNoForgedLine(refusal.recovery);
+				}
+			}
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("the subproject-.pi rejection warning escapes the directory it rejects (§4.7)", {
+		skip: process.platform === "win32" ? "POSIX hostile bytes in path components" : false,
+	}, () => {
+		// This warning names a directory its own creator controls — the
+		// actor the bound defends against (issue #47) — so the fixture
+		// stages a hostile-named install root with a planted .pi below it.
+		for (const shape of SHAPES) {
+			const base = mkdtempSync(join(tmpdir(), "ghjig-forge-locate-"));
+			try {
+				const installDir = join(base, shape, ".pi", "extensions", "ghjig");
+				mkdirSync(installDir, { recursive: true });
+				const moduleFile = join(installDir, "locate.ts");
+				writeFileSync(moduleFile, "// stand-in for the installed module\n");
+				mkdirSync(join(installDir, ".pi"));
+				const { warnings } = captureWarnings(() => locateRepoRootFrom(moduleFile));
+				assert.equal(warnings.length, 1, `expected one rejection warning, got ${JSON.stringify(warnings)}`);
+				assert.match(warnings[0], /it sits below the install root/);
+				assertNoForgedLine(warnings[0]);
+			} finally {
+				rmSync(base, { recursive: true, force: true });
+			}
+		}
+	});
+
+	it("the discovery-failed warning escapes the module path it names (§3.9)", () => {
+		// Nothing on this fixture path exists: every probe on the walk
+		// answers absent, so the hostile bytes ride the moduleFile argument
+		// into the warning without any directory entry on disk.
+		for (const shape of SHAPES) {
+			const moduleFile = join(tmpdir(), "ghjig-forge-missing", shape, "nested", "a", "b", "locate.ts");
+			const { warnings } = captureWarnings(() => locateRepoRootFrom(moduleFile));
+			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
+			assert.match(warnings[0], /repo-root discovery failed/);
+			assertNoForgedLine(warnings[0]);
+		}
+	});
+
+	it("the relative-module refusal escapes the path it refuses (§4.6)", () => {
+		for (const shape of SHAPES) {
+			assert.throws(
+				() => locateRepoRootFrom(shape),
+				(error: unknown) => {
+					assert.ok(error instanceof Error, `expected an Error, got ${String(error)}`);
+					assert.match(error.message, /cannot anchor the relative module path/);
+					assertNoForgedLine(error.message);
+					return true;
+				},
+			);
+		}
+	});
+
+	it("both seam refusals escape the seam value they quote back (§3.9, §5.5)", () => {
+		for (const shape of SHAPES) {
+			// Relative → the not-absolute arm; the shapes carry no leading /.
+			process.env[SEAM] = shape;
+			assert.throws(
+				() => resolveStateRoot(),
+				(error: unknown) => {
+					assert.ok(error instanceof Error, `expected an Error, got ${String(error)}`);
+					assert.match(error.message, /is set but not an absolute path/);
+					assertNoForgedLine(error.message);
+					return true;
+				},
+			);
+			// Absolute but absent → the unusable arm; nothing is created.
+			process.env[SEAM] = join(tmpdir(), "ghjig-forge-seam", shape);
+			assert.throws(
+				() => resolveStateRoot(),
+				(error: unknown) => {
+					assert.ok(error instanceof Error, `expected an Error, got ${String(error)}`);
+					assert.match(error.message, /is set but unusable/);
+					assertNoForgedLine(error.message);
+					return true;
+				},
+			);
 		}
 	});
 });

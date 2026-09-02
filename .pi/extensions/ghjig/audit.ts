@@ -130,6 +130,7 @@
 import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, statSync, writeFileSync } from "node:fs";
 import type { Stats } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
+import { quoted } from "./quote.ts";
 
 /** The audit file name the runtime and its consumers agree on (§5.5). */
 export const AUDIT_FILE_NAME = "audit.jsonl";
@@ -216,11 +217,11 @@ export function sinkRefusal(stats: Stats, sinkPath: string): SinkRefusal | undef
 		return undefined;
 	}
 	return {
-		cause: `the sink at ${sinkPath} was opened and refused before the write: ${failed.join("; ")}`,
+		cause: `the sink at ${quoted(sinkPath)} was opened and refused before the write: ${failed.join("; ")}`,
 		recovery:
 			modeFailed && failed.length === 1
-				? `run \`chmod 600 ${sinkPath}\`, then re-run — the record at rest is readable only by the account that writes it (§5.5).`
-				: `remove ${sinkPath}, then re-run — the append recreates the sink as a plain 0600 file carrying exactly one name.`,
+				? `run \`chmod 600 ${quoted(sinkPath)}\`, then re-run — the record at rest is readable only by the account that writes it (§5.5).`
+				: `remove ${quoted(sinkPath)}, then re-run — the append recreates the sink as a plain 0600 file carrying exactly one name.`,
 	};
 }
 
@@ -320,12 +321,12 @@ function componentKind(path: string): "directory" | "other" | "absent" {
 export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string): string {
 	const code = (error as { code?: string } | null)?.code;
 	if (code === "ENOENT") {
-		return `create the audit destination directory ${stateRoot} (mkdir -p), then re-run.`;
+		return `create the audit destination directory ${quoted(stateRoot)} (mkdir -p), then re-run.`;
 	}
 	if (code === "ENOTDIR") {
 		return (
-			`replace ${nonDirectoryAncestor(sinkPath) ?? stateRoot} with a directory — it is not one, ` +
-			`and nothing can be created beneath a plain file — then create ${stateRoot} (mkdir -p) and re-run.`
+			`replace ${quoted(nonDirectoryAncestor(sinkPath) ?? stateRoot)} with a directory — it is not one, ` +
+			`and nothing can be created beneath a plain file — then create ${quoted(stateRoot)} (mkdir -p) and re-run.`
 		);
 	}
 	// The guard is what keeps this arm's own recovery live: it prescribes an
@@ -340,33 +341,33 @@ export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string)
 	if (code === "EACCES" && !existsSync(sinkPath) && componentKind(stateRoot) === "directory") {
 		return (
 			`grant this account write and search permission on the audit destination directory ` +
-			`${stateRoot} (chmod u+wx), then re-run — until its mode admits this account the sink there ` +
+			`${quoted(stateRoot)} (chmod u+wx), then re-run — until its mode admits this account the sink there ` +
 			`can be neither opened nor created, and cannot even be measured to say which.`
 		);
 	}
 	if (code === "ENOSPC" || code === "EDQUOT") {
 		return (
-			`free space on the filesystem holding ${sinkPath}, or raise this account's quota on it, ` +
+			`free space on the filesystem holding ${quoted(sinkPath)}, or raise this account's quota on it, ` +
 			`then re-run — the record was refused for want of room, not for want of permission, ` +
 			`so nothing at that path is misconfigured and no mode there admits it.`
 		);
 	}
 	if (code === "EROFS") {
 		return (
-			`remount the filesystem holding ${sinkPath} read-write, or point the state root at a ` +
+			`remount the filesystem holding ${quoted(sinkPath)} read-write, or point the state root at a ` +
 			`writable filesystem, then re-run — while the mount refuses writes no permission or mode ` +
 			`at that path can admit the record.`
 		);
 	}
 	if (code === "EIO") {
 		return (
-			`no act at ${sinkPath} restores this record: the write reached the filesystem and the ` +
+			`no act at ${quoted(sinkPath)} restores this record: the write reached the filesystem and the ` +
 			`device or transport under it reported an error, so the record is lost. Restore the health ` +
 			`of that filesystem — for a network mount, its connection — then re-run to resume the trail.`
 		);
 	}
 	return (
-		`make ${sinkPath} a plain file writable by this account, then re-run — ` +
+		`make ${quoted(sinkPath)} a plain file writable by this account, then re-run — ` +
 		`a directory, a FIFO, a symlink, or another account's file at that path all refuse the append ` +
 		`(a symlink at that final component is refused rather than followed, and a reader-less FIFO raises ENXIO at ` +
 		`the open; a symlink at a PARENT is still followed — that ancestor policy belongs to the state-root seam (§5.5)).`
@@ -404,7 +405,7 @@ export function appendAuditRecord(stateRoot: string, input: AuditInput): boolean
 	// throw, because this row is open (see the header).
 	if (!isAbsolute(stateRoot)) {
 		warnDegraded(
-			`the state root ${JSON.stringify(stateRoot)} is not an absolute path, so the sink under it would ` +
+			`the state root ${quoted(stateRoot)} is not an absolute path, so the sink under it would ` +
 				`resolve against whatever directory this process happens to stand in`,
 			`call this primitive with the absolute state root \`resolveStateRoot\` returns — the trail belongs ` +
 				`inside the repository whose work it records, and an ambient working directory is not one.`,
@@ -440,7 +441,10 @@ export function appendAuditRecord(stateRoot: string, input: AuditInput): boolean
 		closeSync(fd);
 		return true;
 	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error);
+		// Escaped at the extraction (issue #47): a filesystem error message
+		// embeds the sink path verbatim, so this carrier forges lines exactly
+		// as an interpolation does.
+		const reason = quoted(error instanceof Error ? error.message : String(error));
 		warnDegraded(reason, recoveryFor(error, stateRoot, sinkPath));
 		return false;
 	} finally {
