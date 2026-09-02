@@ -52,14 +52,29 @@
  * `locateRepoRootFrom` does, because the `audit-append` row is open
  * where `repo-root-discovery` is not.
  *
- * One shape defeats the open posture and is NOT closed here: a FIFO at
- * the sink path. `O_NOFOLLOW` refuses a symlink, not a named pipe, and
- * `openSync` on a FIFO with no reader blocks indefinitely — the append
- * neither returns nor throws, so the extension factory hangs where this
- * row promises a warning and a `false`. Measured identical before and
- * after this primitive stopped using `appendFileSync`, so it is neither
- * introduced nor widened here. Enumerated in place rather than left to
- * the ticket alone (§3.11); tracked as #44.
+ * Neither flag closes every hostile shape at the sink path, so the open
+ * is followed by one `fstat` VERDICT on the descriptor it returned —
+ * no TOCTOU window, the verdict binds to the opened inode (#44). It
+ * refuses anything that is not a regular file carrying exactly one name,
+ * no group/other mode bits, and this account's ownership; every refusal
+ * degrades open like any other unwritable destination. The hard link is
+ * why `nlink === 1` is demanded: the link IS a regular file this account
+ * can append to, so `O_NOFOLLOW` admits it and every record would land
+ * in an inode another name owns and can read. A FIFO is why `O_NONBLOCK`
+ * rides `SINK_FLAGS`: `openSync` on a reader-less FIFO otherwise blocks
+ * before any verdict can run, hanging the extension factory that appends
+ * at load. With the flag, the reader-less open raises `ENXIO` at once
+ * and an open with a reader returns a descriptor the verdict refuses —
+ * both branches terminate, so §5.9's hung-dependency requirement is met
+ * by this narrower fix and NO timeout wrapper sits at factory scope: a
+ * timeout converts a refusal that carries its cause into one that
+ * carries none. The flag is never cleared — Node exposes no `fcntl` to
+ * clear it, and clearing is unnecessary because only a regular file
+ * survives the verdict and POSIX gives `O_NONBLOCK` no effect on
+ * regular-file `write(2)`. What stays open (§3.11): a symlinked ANCESTOR
+ * of the sink path is still followed — the admissible-target policy for
+ * ancestors belongs to the state-root seam (§5.5) and is not closed
+ * here.
  *
  * The record is written through `writeRecordLine` — the fd form of
  * `writeFileSync`, never `writeSync`. `writeSync` is one `write(2)`: it
@@ -81,7 +96,9 @@
  * carries one malformed line. That torn record is the one way the
  * one-record-per-line format above can break — free text never breaks
  * it — and it is the residual this primitive does not model (§3.11).
- * Through `appendAuditRecord` the descriptor is always blocking, so the
+ * Through `appendAuditRecord` the descriptor carries `O_NONBLOCK`, but
+ * only a regular file survives the verdict and `O_NONBLOCK` has no
+ * effect on regular-file `write(2)` (POSIX), so the
  * reachable instance is a mid-write `ENOSPC` on a regular file, and no
  * act on the writer side repairs a line already at rest: the consumer of
  * the trail is the side that must refuse a final line carrying no
@@ -90,12 +107,14 @@
  *
  * The write-all property is pinned at the SEAM rather than through this
  * function (§3.12). A short write is not stageable through
- * `appendAuditRecord` — that would need a filesystem filled mid-write on
- * a test host — but "cannot return without writing everything, or raise"
- * is a property of `writeRecordLine` alone, and a non-blocking
- * descriptor stages it in one call. That is why the write is a named
- * export rather than an inline call, the same device the recovery arms
- * use to reach `recoveryFor` directly.
+ * `appendAuditRecord` — only a regular file reaches the write, where the
+ * non-blocking flag is inert, so staging one would need a filesystem
+ * filled mid-write on a test host — but "cannot return without writing
+ * everything, or raise" is a property of `writeRecordLine` alone, and a
+ * non-blocking descriptor ON A PIPE stages it in one call. That is why
+ * the write is a named export rather than an inline call, the same
+ * device the recovery arms use to reach `recoveryFor` directly and the
+ * sink verdict uses for its root-only dimensions.
  *
  * "Never throw" reaches the close. `closeSync` reports delayed-write
  * failures (`EIO`, `ENOSPC`, a network filesystem), and a throw out of a
@@ -108,14 +127,20 @@
  * closes only the descriptor a failed write left behind, guarded because
  * a second failure on an already-reported append has nothing to add.
  */
-import { closeSync, constants, existsSync, lstatSync, openSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, statSync, writeFileSync } from "node:fs";
+import type { Stats } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
 /** The audit file name the runtime and its consumers agree on (§5.5). */
 export const AUDIT_FILE_NAME = "audit.jsonl";
 
-/** Append-only, create-if-absent, never through a symlink (§4.6). */
-const SINK_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW;
+/**
+ * Append-only, create-if-absent, never through a symlink (§4.6), and
+ * never parked on a reader-less FIFO (`O_NONBLOCK` — see the header;
+ * inert on the regular files that survive the verdict).
+ */
+const SINK_FLAGS =
+	constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 /** Owner read/write only — the record at rest (§5.5). */
 const SINK_MODE = 0o600;
@@ -127,12 +152,76 @@ const SINK_MODE = 0o600;
  * short count as a success (see the header).
  *
  * Exported so the property can be measured where it is stageable (§3.12):
- * the sink descriptor `appendAuditRecord` opens is always blocking, so a
- * short write cannot be provoked through that surface, while on a
- * non-blocking descriptor it is one call away.
+ * the descriptor `appendAuditRecord` hands this function has survived the
+ * sink verdict, so it is a regular file — where its `O_NONBLOCK` is inert
+ * — and a short write cannot be provoked through that surface, while on
+ * a non-blocking PIPE descriptor it is one call away.
  */
 export function writeRecordLine(fd: number, line: string): void {
 	writeFileSync(fd, line);
+}
+
+/** A sink-verdict refusal: what was measured, and the act that repairs it. */
+export interface SinkRefusal {
+	cause: string;
+	recovery: string;
+}
+
+/**
+ * The verdict the open's `fstat` answer is held to (§4.6, §5.5 — see the
+ * header). Admits exactly a regular file carrying one name, no
+ * group/other mode bits, and this account's ownership; anything else is
+ * a refusal the caller degrades open on, never a throw. Every failing
+ * dimension is enumerated in the cause rather than the first alone —
+ * partly for the operator, and partly because it is what lets one real
+ * kernel object pin several dimensions at once at the seam (§3.12): the
+ * owner and character-device dimensions are not stageable AT THE SINK
+ * PATH without root (chown to another account and mknod both need root,
+ * and `link(2)` from devfs is cross-device), so they are measured
+ * against real `fstat` Stats of `/dev/null`, through this export — the
+ * same device `writeRecordLine` and `recoveryFor` already are.
+ *
+ * The recovery is arm-scoped (§3.11): the type/link/owner shapes are
+ * hostile-input class and get the terse general act (make the path a
+ * fresh plain file), while a loose mode alone is honest-mistake
+ * reachable — a sink pre-created `0644` keeps its bits, since the
+ * `0600` create mode binds only at creation — and names the one live
+ * act, `chmod 600`. Naming `chmod` while the type or owner dimension
+ * also fails would prescribe a dead act, so it is named only when the
+ * mode is all that failed.
+ *
+ * Where `process.geteuid` is absent (win32), the owner dimension is
+ * unmeasurable in these terms and is SKIPPED rather than refused —
+ * enumerated residual (§3.11): POSIX ownership does not model that
+ * host's ACLs, and refusing every append there would move the row's
+ * fail direction on a dimension no act on that host repairs.
+ */
+export function sinkRefusal(stats: Stats, sinkPath: string): SinkRefusal | undefined {
+	const failed: string[] = [];
+	if (!stats.isFile()) {
+		failed.push("it is not a regular file");
+	}
+	if (stats.nlink !== 1) {
+		failed.push(`its inode carries ${stats.nlink} names, not one`);
+	}
+	const modeFailed = (stats.mode & 0o077) !== 0;
+	if (modeFailed) {
+		failed.push(`its mode ${(stats.mode & 0o777).toString(8)} admits group or other accounts`);
+	}
+	const euid = process.geteuid?.();
+	if (euid !== undefined && stats.uid !== euid) {
+		failed.push(`it is owned by uid ${stats.uid}, not this account (euid ${euid})`);
+	}
+	if (failed.length === 0) {
+		return undefined;
+	}
+	return {
+		cause: `the sink at ${sinkPath} was opened and refused before the write: ${failed.join("; ")}`,
+		recovery:
+			modeFailed && failed.length === 1
+				? `run \`chmod 600 ${sinkPath}\`, then re-run — the record at rest is readable only by the account that writes it (§5.5).`
+				: `remove ${sinkPath}, then re-run — the append recreates the sink as a plain 0600 file carrying exactly one name.`,
+	};
 }
 
 /**
@@ -278,8 +367,9 @@ export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string)
 	}
 	return (
 		`make ${sinkPath} a plain file writable by this account, then re-run — ` +
-		`a directory, a symlink, or another account's file at that path all refuse the append ` +
-		`(a symlink at that final component is refused rather than followed; a hard link there, or a symlink at a parent, is not — see #44).`
+		`a directory, a FIFO, a symlink, or another account's file at that path all refuse the append ` +
+		`(a symlink at that final component is refused rather than followed, and a reader-less FIFO raises ENXIO at ` +
+		`the open; a symlink at a PARENT is still followed — that ancestor policy belongs to the state-root seam (§5.5)).`
 	);
 }
 
@@ -334,6 +424,15 @@ export function appendAuditRecord(stateRoot: string, input: AuditInput): boolean
 	try {
 		const fd = openSync(sinkPath, SINK_FLAGS, SINK_MODE);
 		leaked = fd;
+		// The verdict binds to the opened inode BEFORE any byte is written
+		// (see the header): a refusal degrades open through the same signal
+		// every other unwritable destination takes, and the `finally` below
+		// closes the descriptor it leaves behind.
+		const refusal = sinkRefusal(fstatSync(fd), sinkPath);
+		if (refusal !== undefined) {
+			warnDegraded(refusal.cause, refusal.recovery);
+			return false;
+		}
 		// Write-all, not one `write(2)`: a short count discarded here is a
 		// partial record reported as a success (see the header).
 		writeRecordLine(fd, `${JSON.stringify(record)}\n`);

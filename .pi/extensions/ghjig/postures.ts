@@ -24,7 +24,9 @@ export const POSTURES: readonly PostureRow[] = [
 	{
 		dependency: "audit-append",
 		failureShape:
-			"audit destination missing or unwritable (includes the wrapped load-marker site at extension load)",
+			"audit destination missing or unwritable — including a sink the fstat verdict refuses: not a regular " +
+			"file (FIFO, device), more than one hard-link name, group/other mode bits, or another account's " +
+			"ownership (includes the wrapped load-marker site at extension load)",
 		posture: "open",
 		justification: "Additive observability never moves a fail direction (§3.8).",
 	},
