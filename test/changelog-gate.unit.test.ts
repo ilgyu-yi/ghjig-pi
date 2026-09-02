@@ -48,10 +48,17 @@
  * Every fixture lives under `tmpdir()`. The harness asserts `git status
  * --porcelain` is byte-identical across the suite (`harness/run-pi.ts`), so a
  * fixture written into the repository tree would red an unrelated suite.
+ *
+ * Issue #49 names five single-edit weakenings of the script; this file
+ * carries exactly five killers, one per weakening, each marked at its site
+ * with the weakening number it kills: 1 → T27, 2 → S1, 3 → T28, 4 → T7's
+ * enum-extension assertion, 5 → T9's summary assertion. T26, the zero-entry
+ * listing, is a fixture for a shape the gate must classify, not a mutant
+ * killer.
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -106,9 +113,11 @@ const SKIP_LABEL = /skip-changelog/;
 
 /**
  * Every exit-1 arm names a live positive remediation. This is the union of
- * the per-arm remediations; T10 holds every blocking fixture to it.
+ * the per-arm remediations; T10 holds every blocking fixture to it. `Usage:`
+ * is the invocation arms' remediation: for a malformed call the live act is
+ * re-issuing the call correctly, and the usage line is what states it.
  */
-const REMEDIATION = /skip-changelog|re-run|Rename the file|Closes|TEMPLATE\.md/;
+const REMEDIATION = /skip-changelog|re-run|Rename the file|Closes|TEMPLATE\.md|Usage:/;
 
 interface FileEntry {
 	filename: string;
@@ -141,6 +150,18 @@ interface CaseSpec {
 	pr: number;
 	/** Exit 1 expected — the set T10 sweeps. */
 	expectBlock: boolean;
+	/**
+	 * Raw argv tokens appended after the standard argument set. The argument
+	 * loop's own arms — a trailing flag with no value, an overwritten earlier
+	 * value — are reached only by an argv the standard set cannot express.
+	 */
+	extraArgs?: string[];
+	/**
+	 * Omit the `--allowed` pair from the argv entirely. Not the same seam as
+	 * `extraArgs`: an absent flag and a flag with an empty value take
+	 * different paths through the argument loop.
+	 */
+	omitAllowed?: boolean;
 	/**
 	 * Reuse another case's root and files. Two payload shapes over one
 	 * identical tree make their outputs directly comparable.
@@ -554,6 +575,55 @@ const CASES: CaseSpec[] = [
 		pr: 43,
 		expectBlock: true,
 	},
+	{
+		id: "T26",
+		// `[[]]` is one page with zero entries — the shape the platform returns
+		// for a PR whose net diff is empty, and the workflow's fetch predicate
+		// deliberately admits it so the script can be the one that decides.
+		summary: "a listing document carrying no entries leaves the floor unmet",
+		files: {},
+		pages: [[]],
+		expectedCount: 0,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+	},
+	{
+		id: "T27",
+		// The trailing `--pr` carries no value (#49 weakening 1). An
+		// unconditional two-argument shift dies here under `set -e` before the
+		// required-args arm can speak, producing exit 1 with an EMPTY stderr —
+		// the one thing the exit contract forbids. Only the guarded second
+		// shift reaches the arm that names the omission.
+		summary: "a trailing flag with no value is refused with the omission named, never silently",
+		files: {},
+		pages: [],
+		rawStdin: "unread: the argument arms exit before stdin is touched",
+		expectedCount: 1,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+		extraArgs: ["--pr"],
+	},
+	{
+		id: "T28",
+		// `--allowed` never given at all (#49 weakening 3). An absent allow-set
+		// is not an empty one: without `--allowed` in the required-args arm the
+		// gate proceeds, every stem fails the allow-set rule, and the refusal
+		// blames the author for a transport-shaped omission with two
+		// recoveries (rename / update Closes) that cannot clear it. The
+		// fragment here is valid and in a well-formed listing precisely so
+		// that, under that weakening, the run reaches the wrong-blame arm this
+		// case forbids.
+		summary: "an omitted --allowed is refused as the caller's omission, not blamed on the author's stem",
+		files: { "changelog_unreleased/fixed/43.md": validBullet(43) },
+		pages: [[{ filename: "changelog_unreleased/fixed/43.md", status: "added" }]],
+		expectedCount: 1,
+		allowed: "43",
+		pr: 43,
+		expectBlock: true,
+		omitAllowed: true,
+	},
 ];
 
 const roots = new Map<string, string>();
@@ -581,10 +651,10 @@ function runGate(spec: CaseSpec, root: string): GateResult {
 		String(spec.pr),
 		"--expected-count",
 		String(spec.expectedCount),
-		"--allowed",
-		spec.allowed,
+		...(spec.omitAllowed === true ? [] : ["--allowed", spec.allowed]),
 		"--root",
 		root,
+		...(spec.extraArgs ?? []),
 	];
 	const options = { input: spec.rawStdin ?? JSON.stringify(spec.pages), encoding: "utf8" as const };
 	try {
@@ -715,6 +785,17 @@ describe("T7 — a file status outside the known set", () => {
 		assert.match(resultOf("T7").stderr, /re-run/i);
 	});
 
+	/**
+	 * Pinned here by name rather than via T10's union (#49 weakening 4): a
+	 * message naming re-running alone also matches that union's `re-run`, so
+	 * only an assertion on the enum-extension recovery itself can separate
+	 * the two — and narrowing the union instead would strip `re-run` from
+	 * arms (truncation, fetch) for which re-running IS the whole recovery.
+	 */
+	it("names the enum-extension recovery, which re-running can never substitute for", () => {
+		assert.match(resultOf("T7").stderr, /add the status to the known set/);
+	});
+
 	it("is distinguishable from the clause-1 refusal", () => {
 		assert.doesNotMatch(resultOf("T7").stderr, NO_FRAGMENT);
 	});
@@ -749,6 +830,16 @@ describe("T9 — a rename to an out-of-allow-set stem beside a valid added fragm
 
 	it("names the renamed-to stem on stderr", () => {
 		assert.match(resultOf("T9").stderr, /77/);
+	});
+
+	/**
+	 * Asserted on THIS case because its offender is a rename (#49 weakening
+	 * 5): a summary narrowed back to "added" would tell the author of exactly
+	 * this refusal that a rule for added files caught them, while the loop it
+	 * summarises also covers renamed and copied entries.
+	 */
+	it("summarises the clause over every status the loop covers, not added alone", () => {
+		assert.match(resultOf("T9").stderr, /Every added, renamed or copied fragment/);
 	});
 });
 
@@ -924,6 +1015,75 @@ describe("T24 — an entry the platform sent with no status", () => {
 			resultOf("T24").stderr,
 			/Unrecognized file status '' for 'changelog_unreleased\/fixed\/43\.md'/,
 		);
+	});
+});
+
+/**
+ * S1 — the empty-payload arm's FORM, pinned structurally (#49 weakening 2).
+ *
+ * The `case` arm and the whole-payload substitution
+ * (`${payload//[[:space:]]/}`) have identical truth tables, so no
+ * stdin-driven fixture can separate them; they differ in whether the script
+ * returns at all on a listing of real size, and a wall-clock assertion is a
+ * false-red class. The deterministic proxy is the script's own text: the
+ * substitution token must not appear in code. The script's commentary NAMES
+ * the rejected form while explaining the decision, so the scan runs over a
+ * comment-stripped view — over the raw bytes the absence assertion would be
+ * vacuously red.
+ */
+describe("S1 — the empty-payload arm short-circuits instead of rebuilding the payload", () => {
+	const codeLines = readFileSync(SCRIPT, "utf8")
+		.split("\n")
+		.filter((line) => !/^\s*#/.test(line));
+
+	it("keeps the whole-payload substitution out of the code: its only mention is commentary", () => {
+		assert.deepEqual(codeLines.filter((line) => line.includes("payload//")), []);
+	});
+
+	it("tests the payload with a case arm, which stops at the first non-space byte", () => {
+		assert.equal(codeLines.filter((line) => /^\s*case "\$payload" in/.test(line)).length, 1);
+	});
+});
+
+describe("T26 — a listing document carrying no entries", () => {
+	it("blocks", () => {
+		assert.equal(resultOf("T26").status, 1);
+	});
+
+	it("refuses in clause-1 terms: an empty net diff has no witness", () => {
+		assert.match(resultOf("T26").stderr, NO_FRAGMENT);
+	});
+
+	it("offers the skip label as the live remediation", () => {
+		assert.match(resultOf("T26").stderr, SKIP_LABEL);
+	});
+
+	it("is distinguishable from the empty-payload transport refusal: the listing WAS read", () => {
+		assert.doesNotMatch(resultOf("T26").stderr, /transport failure/);
+	});
+});
+
+describe("T27 — a trailing flag given without its value", () => {
+	it("blocks", () => {
+		assert.equal(resultOf("T27").status, 1);
+	});
+
+	it("names the omitted arguments on stderr: exit 1 with an empty stderr is outside the contract", () => {
+		assert.match(resultOf("T27").stderr, /--pr, --expected-count and --allowed are all required/);
+	});
+});
+
+describe("T28 — --allowed never given", () => {
+	it("blocks", () => {
+		assert.equal(resultOf("T28").status, 1);
+	});
+
+	it("names the omission in required-arguments terms", () => {
+		assert.match(resultOf("T28").stderr, /--pr, --expected-count and --allowed are all required/);
+	});
+
+	it("does not blame the author's stem for the caller's omission", () => {
+		assert.doesNotMatch(resultOf("T28").stderr, /neither this PR's number/);
 	});
 });
 
