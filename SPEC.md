@@ -35,35 +35,35 @@ This document is the repository's behavioural SSOT: every enforced norm, gate cl
 | &nbsp;&nbsp;§3.1 | The constraint | 320 |
 | &nbsp;&nbsp;§3.2 | The three tiers | 327 |
 | &nbsp;&nbsp;§3.3 | Gate classes | 335 |
-| &nbsp;&nbsp;§3.4 | Agent-agnosticism of the tiers | 370 |
-| &nbsp;&nbsp;§3.5 | Gate conduct | 374 |
-| &nbsp;&nbsp;§3.6 | Enforcement-face selection | 378 |
-| &nbsp;&nbsp;§3.7 | Approval-gate completeness | 388 |
-| &nbsp;&nbsp;§3.8 | Escape architecture | 400 |
-| &nbsp;&nbsp;§3.9 | Fail policy | 413 |
-| &nbsp;&nbsp;§3.10 | Delegated computation | 427 |
-| &nbsp;&nbsp;§3.11 | Gate design | 437 |
-| &nbsp;&nbsp;§3.12 | Gate verification | 459 |
-| §4 | Substrate and install contract | 469 |
-| &nbsp;&nbsp;§4.1 | Namespaces | 473 |
-| &nbsp;&nbsp;§4.2 | Target-parameterization | 479 |
-| &nbsp;&nbsp;§4.3 | PR-based installs | 483 |
-| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 487 |
-| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 491 |
-| &nbsp;&nbsp;§4.6 | Binding and resolution | 497 |
-| &nbsp;&nbsp;§4.7 | Host boundary | 507 |
-| §5 | Cross-cutting contracts | 515 |
-| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 519 |
-| &nbsp;&nbsp;§5.2 | Graceful degradation | 523 |
-| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 527 |
-| &nbsp;&nbsp;§5.4 | Work language | 531 |
-| &nbsp;&nbsp;§5.5 | State boundary | 535 |
-| &nbsp;&nbsp;§5.6 | Operating modes | 541 |
-| &nbsp;&nbsp;§5.7 | Unattended conduct | 551 |
-| &nbsp;&nbsp;§5.8 | Context lifecycle | 561 |
-| &nbsp;&nbsp;§5.9 | Session surfaces | 569 |
-| §6 | Self-governance milestone | 577 |
-| &nbsp;&nbsp;§6.1 | Substrate posture | 588 |
+| &nbsp;&nbsp;§3.4 | Agent-agnosticism of the tiers | 381 |
+| &nbsp;&nbsp;§3.5 | Gate conduct | 385 |
+| &nbsp;&nbsp;§3.6 | Enforcement-face selection | 389 |
+| &nbsp;&nbsp;§3.7 | Approval-gate completeness | 399 |
+| &nbsp;&nbsp;§3.8 | Escape architecture | 411 |
+| &nbsp;&nbsp;§3.9 | Fail policy | 424 |
+| &nbsp;&nbsp;§3.10 | Delegated computation | 438 |
+| &nbsp;&nbsp;§3.11 | Gate design | 448 |
+| &nbsp;&nbsp;§3.12 | Gate verification | 470 |
+| §4 | Substrate and install contract | 480 |
+| &nbsp;&nbsp;§4.1 | Namespaces | 484 |
+| &nbsp;&nbsp;§4.2 | Target-parameterization | 490 |
+| &nbsp;&nbsp;§4.3 | PR-based installs | 494 |
+| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 498 |
+| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 502 |
+| &nbsp;&nbsp;§4.6 | Binding and resolution | 508 |
+| &nbsp;&nbsp;§4.7 | Host boundary | 518 |
+| §5 | Cross-cutting contracts | 526 |
+| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 530 |
+| &nbsp;&nbsp;§5.2 | Graceful degradation | 534 |
+| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 538 |
+| &nbsp;&nbsp;§5.4 | Work language | 542 |
+| &nbsp;&nbsp;§5.5 | State boundary | 546 |
+| &nbsp;&nbsp;§5.6 | Operating modes | 552 |
+| &nbsp;&nbsp;§5.7 | Unattended conduct | 562 |
+| &nbsp;&nbsp;§5.8 | Context lifecycle | 572 |
+| &nbsp;&nbsp;§5.9 | Session surfaces | 580 |
+| §6 | Self-governance milestone | 588 |
+| &nbsp;&nbsp;§6.1 | Substrate posture | 599 |
 <!-- TOC END -->
 
 ## 0. Intent and scope
@@ -364,6 +364,17 @@ The gate classes the enforcement layer commits to are recorded in the table belo
 **What the rule moves, and what it merely assigns.** Some rows the rule relocates; others it places for the first time — a row that recorded no tier before is assigned a home rather than moved, and the change claims no more reach than that. `protected-branch` guards two acts and places per arm; `force-push` and `protected-branch`'s landing arm home at tier 3 because git and the platform each hold the deciding fact exactly, so exactness discriminates nothing and the irreversible moment — publication — selects the platform. Both homes are live at the ruleset (§3.2), and the ruleset's default-branch condition is the scope residual each row records in place. `protected-branch`'s commit arm decides on which branch `HEAD` sits when the commit is made: git holds that natively and the platform has no representation of it at that moment, nothing having been published, so that arm's decision is **taken** at tier 2. It is not a pre-image of the landing arm's gate either: §3.11 fixes a pre-image by local and remote not diverging over one act, which is not evaluable for an act the remote gate never sees. The two arms guard different acts, and a local commit is reversible until the landing the other arm gates. What this tree carries at tier 2 is the call-site shape and not yet the check: `.githooks/pre-commit` and `.githooks/pre-push` are committed and call the class's own predicate — the first on the branch `HEAD` is on, the second on each target ref — while the helper they delegate that predicate to is not shipped here, and `.githooks/_lib.sh` no-ops the adapter when it is absent. Tier 1, which can only lex a command string for a fact §3.11 binds to what a ref *is*, is confined to an echo on either arm. `force-push` has no tier-2 call site of its own: its earlier tier-2 entry read *by subsumption*, which is a coverage claim and not an ownership one — §3.11 binds ownership to the predicate, and the adapter shows the local tier evaluates no sharedness predicate at all: `.githooks/pre-push` tests only `is_protected_branch` on the target, and reads the remote oid it is handed as a positional filler explicitly marked unused. What tier 2 blocks there it blocks under the neighbouring class's predicate, so no call site of this row's own predicate sits beneath its home and the `earlier:` slot is empty. `secret` homes at tier 2 not because git is its only layer — the platform can read a pushed commit's content — but because its guarded act is the **commit**, whose deciding object is the index, and the index has no platform representation at that moment. `change-reach` homes at tier 3 on a part worth naming: the declared set arrives as commit trailers, exact in git, but §2.6's pairwise monotonicity is judged over the pull request's push history, which only the platform holds. `approval-evidence` splits by arm — the review-gated merge arm terminates at a blocking platform surface, and the ruleset beneath it blocks a landing that arrives outside a pull request while evaluating no approval predicate, so the landing is backstopped and the approval predicate's backstop stands deferred; the other arms §3.7 names have no such surface and their terminal acts are reversible, so §3.11's backstop obligation does not reach them. And `egress`'s backstop is structurally unavailable rather than deferred: the bytes exist only at the composing publish call, and the platform's first sight of them is the publication the gate exists to precede.
 
 A row whose `home:` slot records that no instrument holds that home yet is a commitment, not an implementation: the gate lands at the recorded home through its own Doc → Test → Code cycle. A class with no live gate in any tier is advisory and must be labeled so wherever it is stated.
+
+**`protected-branch` ref-identity semantics.** §3.11 binds this class's protection to what a ref **is**, never its literal spelling; what establishes that identity is recorded here, the prose home the column-shape rule routes slot-sized derivations to. The rule source is **one derived identity P** — the branch this repository's own remote pointer names as its default — derived in two stages. Stage 1 reads the local pointer: `git symbolic-ref -q refs/remotes/origin/HEAD`, with the `refs/remotes/origin/` prefix stripped. Stage 2, only where stage 1 fails, measures the remote's advertised default directly: `git ls-remote --symref origin HEAD` with terminal prompts disabled (`GIT_TERMINAL_PROMPT=0`) — a measurement, never a guess, because §3.9's loader rule forbids a guessing fallback (`init.defaultBranch`, the local `HEAD`): a resolver that guesses erodes its own degradation signal until a warning no longer implies its condition. Stage 2 is reachable only from the push surface, where the push's own ref advertisement has already contacted the remote; the commit surface never reaches it, because an offline commit must not open a network connection. The residual that reachability carries is enumerated in place: no portable timeout instrument exists on the host class the tier binds at, so the second connection can hang — accepted with prompts disabled and only on a surface whose own advertisement has just succeeded against the same remote. Stage-2 failure is keyed by outcome, not cause (§3.10): a non-zero exit, or empty or unparseable output — a dangling remote `HEAD` yields empty output with exit 0. Where both stages fail, P is underivable and the gate is **disarmed for that run and says so plainly**: one audit warn record stating the gate is not enforced (§3.9's degradation-signal rule) — the observable that separates a disarmed allow from an ordinary allow. Stage 2 repairs the absent-pointer case only: a present-but-stale local pointer satisfies stage 1 and never reaches stage 2, so the migration shape — the remote's default moved while the fetched local pointer stayed — is unmodeled, enumerated below.
+
+With P in hand, the boundary is total over what the adapter hands the predicate — the stdin remote-ref column with one `refs/heads/` prefix stripped — in four dispositions:
+
+- **Byte-equal to P** → refused: the ordinary block. A deletion push of P arrives with the real refname in the remote-ref column and is refused the same way.
+- **ASCII-case-fold-equal to P but byte-unequal** → refused, on §3.9's unverifiable-destination clause: refnames are byte strings on the wire, but whether a case-variant lands on the same ref is decided by the remote's filesystem semantics, which the client-side hook cannot observe — the destination is ambiguous, and ambiguity fails toward the block. The named false-block cost (§3.6): a genuinely distinct case-variant branch is over-blocked — reversible, with the tier's escape standing beneath the refusal.
+- **Anything else** → identity established as **not P** → the ordinary allow. The new-branch case lives here: establishability keys on the rule source, not on whether the remote has seen the name before. Non-branch refs (tags) arrive without the stripped prefix and can never byte- or fold-equal a branch name, so they land here too.
+- **P underivable** → the disarmed arm above: machinery degradation on §3.9's absent-dependency side — never the actor's input, so never the measurement-rule refusal.
+
+§3.11's aliased-spelling essential is discharged client-side by git's own refspec resolution: the remote-ref column carries the resolved right-hand side of the push refspec, so an aliased push of P reaches the byte-equal arm carrying P's real refname. Enumerated unmodeled, in place (§3.11): `master` and `release/*` (no second protected-ref rule is minted); remotes not named `origin`; Unicode case-pairs beyond ASCII folding; a branch literally named with a doubled `refs/heads/` prefix; and the stale-pointer shape above.
 
 The placement rule is itself **procedural** (§3.1 rule 1): it binds SPEC authorship, the two rightmost columns of the table above are its only product, and it is enforced at review (§2.3). §3.6's hardening-trigger obligation does not fire on it — that obligation binds irreversible-class norms, and a mis-placed row is a reversible document defect the next amendment repairs.
 
