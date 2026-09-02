@@ -99,6 +99,38 @@ export const POSTURES: readonly PostureRow[] = [
 			"An unverifiable destination never vouches (§3.9; the carve-out covers the tier's machinery, not a live predicate's inputs): the input is the actor's own and the repair is theirs, the tier's --no-verify escape stands open beneath the refusal, and the named false-block cost (§3.6) — a genuinely distinct case-variant branch is over-blocked — is reversible.",
 	},
 	{
+		dependency: "secret-scan-helper",
+		failureShape:
+			"secret_scan.sh absent from the bound helper dir at commit time (githook_source's fail-open miss in .githooks/_lib.sh)",
+		posture: "open",
+		justification:
+			"Enforcement-chain degradation: absent means never installed here, which the acting party did not cause and cannot repair from inside a block (§3.9's machinery carve-out); the advice tier no-ops rather than wedging git (§3.2).",
+	},
+	{
+		dependency: "secret-scan-helper",
+		failureShape:
+			"helper file sources cleanly but does not define scan_staged_secrets (githook_require's guard in .githooks/_lib.sh)",
+		posture: "open",
+		justification:
+			"Enforcement-chain degradation, same carve-out (§3.9): a present-but-incomplete helper degrades to allow, never to a false block under a wrong cause (§3.2).",
+	},
+	{
+		dependency: "secret-scan-patterns",
+		failureShape:
+			"pattern rule source unusable for the run — the committed pattern file absent or unreadable at its repo-root-relative home, an up-front pattern-validation failure (format or ERE compile, probed before any path is scanned), or a set empty after stripping comments and blanks (SPEC §3.3's machinery outcome)",
+		posture: "open",
+		justification:
+			"Machinery degradation, none of it the actor's staged input (§3.9's machinery carve-out): the scan disarms for the run with exactly one audit warn record stating it is not enforced (§3.9's degradation-signal rule) — §3.10's valid-AND-non-empty rule makes a scan that checks nothing say so plainly rather than pass as all-clear, and a partial scan over the valid neighbour rows would be a second, weaker predicate (§3.10's lossy-fallback rule).",
+	},
+	{
+		dependency: "secret-scan-measurement",
+		failureShape:
+			"live scan handed a staged input it cannot measure — a binary path by the numstat no-line-counts outcome, staged content the diff cannot render, or a matcher failure at scan time over one input (SPEC §3.3's unmeasurable-input outcome)",
+		posture: "closed",
+		justification:
+			"Present but cannot measure never vouches (§3.9's measurement rule; the carve-out covers the tier's machinery, not a live predicate's inputs): the staged input is the actor's own and the repair is theirs, the tier's --no-verify escape stands open beneath the refusal, and the refusal carries its own content-free cause distinct from a pattern match (§3.8's refusal-record rule).",
+	},
+	{
 		dependency: "seam-target",
 		failureShape:
 			"GHJIG_TEST_STATE_ROOT set but empty, relative, or not measurable as a directory by this account " +

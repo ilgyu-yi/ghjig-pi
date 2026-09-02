@@ -51,7 +51,6 @@ import { after, before, describe, it } from "node:test";
 import {
 	buildGithookFixture,
 	type CommitAttempt,
-	commitWithMessage,
 	fixtureGit,
 	type GithookFixture,
 	pushRefs,
@@ -364,36 +363,17 @@ describe("boundary pins — green in both tree states (issue #59)", { skip: IS_W
 		}
 	});
 
-	it("pre-commit stays inert: a commit on the protected branch itself succeeds while secret_scan.sh is absent", () => {
-		// The arming boundary (§3.3 commit arm): pre-commit's three-function
-		// require chain exits open at the absent secret_scan.sh — today at
-		// the branch_guard.sh source line, after the helper lands at the
-		// secret_scan.sh line — so this arm holds in both tree states and
-		// pins that shipping branch_guard.sh alone arms NO commit-side check.
-		const fixture = buildGithookFixture({ remote: { defaultBranch: PROTECTED } });
-		try {
-			const attempt = commitWithMessage(fixture, "chore: exercise the commit-side chain\n");
-			assert.equal(attempt.status, 0, `pre-commit armed early — its require chain is unsatisfied: ${attempt.stderr}`);
-			assert.doesNotMatch(
-				attempt.auditDelta,
-				/\bblock\b/,
-				`an inert pre-commit appended a block record; delta: ${JSON.stringify(attempt.auditDelta)}`,
-			);
-		} finally {
-			removeGithookFixture(fixture);
-		}
-	});
 });
 
 describe("current_branch detached-HEAD contract (issue #59, SPEC §3.9)", { skip: IS_WINDOWS }, () => {
 	it("on a detached HEAD, current_branch prints nothing and exits non-zero (direct source)", () => {
-		// Direct-source is deliberate and stated: no live git call site
-		// consumes current_branch by design — pre-commit's require chain
-		// stays unsatisfied until secret_scan.sh lands (the boundary pin
-		// above measures that), so no through-git surface can reach this
-		// function yet. This arm activates when the helper file ships; until
-		// then the absence of the file IS the current truth and the arm
-		// holds vacuously in both tree states.
+		// Direct-source is deliberate and stated: through the live adapter a
+		// detached HEAD reaches is_protected_branch as an empty identity and
+		// resolves to an ordinary allow, indistinguishable at the commit
+		// observable from any feature-branch commit — the function's own
+		// contract (prints nothing, exits non-zero) is reachable only by
+		// calling it. The existence gate below keeps the arm vacuous only
+		// while the helper file is absent.
 		const helperPath = join(repoRoot(), ".githooks", "helpers", "branch_guard.sh");
 		if (!existsSync(helperPath)) {
 			return;

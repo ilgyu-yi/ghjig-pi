@@ -119,6 +119,12 @@ export interface CommitAttempt {
 	status: number | null;
 	stdout: string;
 	stderr: string;
+	/**
+	 * Raw stdout bytes — stdout sits in the leak-assertion domain (§3.8's
+	 * refusal-record rule): a guarded value's absence must be provable at
+	 * byte fidelity on every surface the operator sees, stdout included.
+	 */
+	stdoutBytes: Buffer;
 	/** Raw stderr bytes — for arms that must prove non-UTF-8 subject bytes never surface. */
 	stderrBytes: Buffer;
 	/** The audit-file lines this one commit attempt appended ("" when none). */
@@ -300,7 +306,12 @@ export function removeGithookFixture(fixture: GithookFixture): void {
  * Stage a fresh change and attempt `git commit -F <message>` through the
  * fixture's hook chain. The message travels as BYTES (a Buffer caller can
  * carry invalid UTF-8 or control bytes); the file lands under `.git/` so a
- * hostile message never dirties the fixture worktree.
+ * hostile message never dirties the fixture worktree. The commit runs `-q`
+ * on the same ground the pushRefs note states for stderr: git's own
+ * success summary echoes the branch name on stdout — a legitimate echo of
+ * the actor's own input, not a chain emission — so quieting it keeps the
+ * captured surfaces measuring the hook chain's emissions alone (hook
+ * stdout/stderr still pass through; `-q` silences only git's own summary).
  */
 export function commitWithMessage(
 	fixture: GithookFixture,
@@ -315,18 +326,20 @@ export function commitWithMessage(
 	writeFileSync(messageFile, message);
 
 	const auditBefore = existsSync(fixture.auditFile) ? readFileSync(fixture.auditFile, "utf8") : "";
-	const result = spawnSync("git", ["commit", ...(options.gitArgs ?? []), "-F", messageFile], {
+	const result = spawnSync("git", ["commit", "-q", ...(options.gitArgs ?? []), "-F", messageFile], {
 		cwd: fixture.root,
 		env: { ...baseEnv(fixture), ...(options.env ?? {}) },
 	});
 	const auditAfter = existsSync(fixture.auditFile) ? readFileSync(fixture.auditFile, "utf8") : "";
 
 	const stderrBytes = result.stderr ?? Buffer.alloc(0);
+	const stdoutBytes = result.stdout ?? Buffer.alloc(0);
 	const stderr = stderrBytes.toString("utf8");
 	return {
 		status: result.status,
-		stdout: (result.stdout ?? Buffer.alloc(0)).toString("utf8"),
+		stdout: stdoutBytes.toString("utf8"),
 		stderr,
+		stdoutBytes,
 		stderrBytes,
 		auditDelta: auditAfter.slice(auditBefore.length),
 		cause: stderr
@@ -369,11 +382,13 @@ export function pushRefs(
 	const auditAfter = existsSync(fixture.auditFile) ? readFileSync(fixture.auditFile, "utf8") : "";
 
 	const stderrBytes = result.stderr ?? Buffer.alloc(0);
+	const stdoutBytes = result.stdout ?? Buffer.alloc(0);
 	const stderr = stderrBytes.toString("utf8");
 	return {
 		status: result.status,
-		stdout: (result.stdout ?? Buffer.alloc(0)).toString("utf8"),
+		stdout: stdoutBytes.toString("utf8"),
 		stderr,
+		stdoutBytes,
 		stderrBytes,
 		auditDelta: auditAfter.slice(auditBefore.length),
 		cause: stderr
