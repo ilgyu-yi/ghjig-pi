@@ -40,30 +40,30 @@ This document is the repository's behavioural SSOT: every enforced norm, gate cl
 | &nbsp;&nbsp;§3.6 | Enforcement-face selection | 368 |
 | &nbsp;&nbsp;§3.7 | Approval-gate completeness | 378 |
 | &nbsp;&nbsp;§3.8 | Escape architecture | 390 |
-| &nbsp;&nbsp;§3.9 | Fail policy | 401 |
-| &nbsp;&nbsp;§3.10 | Delegated computation | 411 |
-| &nbsp;&nbsp;§3.11 | Gate design | 421 |
-| &nbsp;&nbsp;§3.12 | Gate verification | 443 |
-| §4 | Substrate and install contract | 453 |
-| &nbsp;&nbsp;§4.1 | Namespaces | 457 |
-| &nbsp;&nbsp;§4.2 | Target-parameterization | 461 |
-| &nbsp;&nbsp;§4.3 | PR-based installs | 465 |
-| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 469 |
-| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 473 |
-| &nbsp;&nbsp;§4.6 | Binding and resolution | 479 |
-| &nbsp;&nbsp;§4.7 | Host boundary | 489 |
-| §5 | Cross-cutting contracts | 497 |
-| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 501 |
-| &nbsp;&nbsp;§5.2 | Graceful degradation | 505 |
-| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 509 |
-| &nbsp;&nbsp;§5.4 | Work language | 513 |
-| &nbsp;&nbsp;§5.5 | State boundary | 517 |
-| &nbsp;&nbsp;§5.6 | Operating modes | 523 |
-| &nbsp;&nbsp;§5.7 | Unattended conduct | 533 |
-| &nbsp;&nbsp;§5.8 | Context lifecycle | 543 |
-| &nbsp;&nbsp;§5.9 | Session surfaces | 551 |
-| §6 | Self-governance milestone | 559 |
-| &nbsp;&nbsp;§6.1 | Substrate posture | 570 |
+| &nbsp;&nbsp;§3.9 | Fail policy | 403 |
+| &nbsp;&nbsp;§3.10 | Delegated computation | 415 |
+| &nbsp;&nbsp;§3.11 | Gate design | 425 |
+| &nbsp;&nbsp;§3.12 | Gate verification | 447 |
+| §4 | Substrate and install contract | 457 |
+| &nbsp;&nbsp;§4.1 | Namespaces | 461 |
+| &nbsp;&nbsp;§4.2 | Target-parameterization | 467 |
+| &nbsp;&nbsp;§4.3 | PR-based installs | 471 |
+| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 475 |
+| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 479 |
+| &nbsp;&nbsp;§4.6 | Binding and resolution | 485 |
+| &nbsp;&nbsp;§4.7 | Host boundary | 495 |
+| §5 | Cross-cutting contracts | 503 |
+| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 507 |
+| &nbsp;&nbsp;§5.2 | Graceful degradation | 511 |
+| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 515 |
+| &nbsp;&nbsp;§5.4 | Work language | 519 |
+| &nbsp;&nbsp;§5.5 | State boundary | 523 |
+| &nbsp;&nbsp;§5.6 | Operating modes | 529 |
+| &nbsp;&nbsp;§5.7 | Unattended conduct | 539 |
+| &nbsp;&nbsp;§5.8 | Context lifecycle | 549 |
+| &nbsp;&nbsp;§5.9 | Session surfaces | 557 |
+| §6 | Self-governance milestone | 565 |
+| &nbsp;&nbsp;§6.1 | Substrate posture | 576 |
 <!-- TOC END -->
 
 ## 0. Intent and scope
@@ -396,17 +396,21 @@ Escape coverage is total: every blocking gate class has a sanctioned, audited es
 - **Strict on honor, loud on refusal.** The honor path enumerates its full conjunction of conditions — an unknown or missing field makes the artifact malformed and unhonored — while the component that decides whether enforcement stays armed takes no dependency that can fail. Every refusal that examined a sanction leaves exactly one record naming the refusing arm — by name, never by count, and never carrying the guarded content; where nothing was examined, nothing is recorded.
 - **Accountable and observable.** An escape record names who accepts responsibility, not only why. A gate enforced by procedure rather than by a runtime reader emits its own escape record on the bypass path, or its "audited" claim is broken. The audit vocabulary is a superset of the escape vocabulary, and additive observability never moves a fail direction: a failing record write never converts a refusal into an honor.
 
+**The local tier's door is a declared deferral.** Tier 2's escape is `--no-verify`, with no sanctioned in-hook escape in front of it. The ground is the tier's construction alone: §3.2 folds the whole tier to `--no-verify`, class-independently — the flag stops every hook before it runs, so the bypass travels a channel no hook-read artifact can observe, and the audit a sanctioned escape owes (§3.5) is exactly what the fold withholds. The rejected alternative — an out-of-band one-shot token the hooks honor and record, with `--no-verify` written down as the unobserved residual beneath it — audits only the cooperative path while the unobserved residual survives untouched; for `commit-format`, whose wrong allow §3.3's row records as reversible, that instrument buys no observation of the residual it exists for and fails §3.6's cost-asymmetry test. The deferral's residual is bounded per class by §3.3's backstop column under §3.11's enforcement-physics rule: `commit-format` — backstop `none (reversible)`, the bypassed subject a local, amendable commit; `protected-branch`'s commit arm — backstop `none` (reversible before publication), the landing arm standing unbypassed at the ruleset beneath any local bypass; `secret` — backstop `deferred` (§3.11 amortized) with an irreversible wrong allow, so bounding that class's residual belongs to the derivation cycle that arms its scan (§1.2, §3.3) and stands named here as open rather than absorbed.
+
 The norm is **procedural today**, enforced at review (§2.3); escape instruments derive with the gates they guard per §1.2's macro-phase clause, and §3.5's escape contract takes this section as its design reference.
 
 ### 3.9 Fail policy
 
 Every dependency the enforcement layer stands on declares its on-miss posture in **one inventory**: the default is fail-open, and each entry flipped to fail-closed carries its own justification in the same place. A security-relevant entry that fails open says **"not enforced"** plainly in its degradation signal — a reader must never mistake a disarmed gate for a passing one. The posture keys on **which failure occurred, not which component failed**: a dependency that is *absent* means the enforcement was never installed — the acting party is not the cause and cannot repair it from inside a block, so it fails open with a warning; a dependency that is *present but cannot measure* is being asked to vouch for something it did not measure, so it fails closed. One component may legitimately carry both postures, one per failure shape. The keying rule allocates postures **within a gate whose declared fail direction is closed**; an advisory-face tier (§3.2's tier 2, §5.2's best-effort aids) stays fail-open on every failure shape — §5.2's aids-versus-evidence-gates split is the home this inventory implements.
 
+**One inventory, one home.** The inventory lives at `.pi/extensions/ghjig/postures.ts` and covers every dependency the enforcement layer stands on — all three tiers, not only the runtime that hosts the file. Posture rows are declarative data carrying their justification in place, read by reviewers and checks, never resolved at decision time by the components they describe: a tier whose postures are compiled into its own control flow (the local tier's fail-open chain, §3.2) is inventoried there with no runtime reader owed, so one home serves the layer without a cross-runtime dependency. A posture declared in a shipped enforcement source outside that file is a second home for the property — §3.11's divergence surface, not redundancy — and the home binds under §6.1's inventory rule through a structural check that fails on exactly that shape.
+
 Dependency-load failure is observable **uniformly**: every load site emits the same typed warning through the same channel, because one site warning while a sibling site fails silently hides the second consumer — the exact shape a uniform rule exists to prevent. A site that structurally cannot warn (the bootstrap that loads the warning machinery itself) is named as the exception rather than left implicit. And when a load fails because a caller passed a wrong path, the fix lands at the **call site**, never in a loader taught to guess: a guessing loader silently rescues genuinely wrong paths and erodes its own signal until a warning no longer implies its condition.
 
 Measurement is a **total function with exactly two outcomes** — a valid value, or nothing plus a failure — and no consumer ever reads an unvalidated value. An unmeasurable predicate refuses; it never approves: an out-of-domain value that errors both sides of a comparison must not collapse the check to "valid". A degraded measurement environment refuses **only the inputs it would mis-measure**; inputs it still measures exactly keep passing, so degradation never blocks wider than the actual loss. Where a measurement failure radiates into callers that consume it for other purposes, that blast radius is disclosed at the contract, not discovered in operation. And a gate that cannot determine what an action will actually land on requires the actor to make the target explicit rather than guessing it from a proxy — an unverifiable destination is ambiguity, and ambiguity fails toward the block.
 
-The norm is **procedural today**, enforced at review (§2.3); the posture inventory is an instrument that derives later per §1.2's macro-phase clause.
+The norm is **procedural today**, enforced at review (§2.3); the posture inventory is homed above, and its remaining instruments derive per §1.2's macro-phase clause.
 
 ### 3.10 Delegated computation
 
@@ -457,6 +461,8 @@ This section states how shell assets install into a repository: target-parameter
 ### 4.1 Namespaces
 
 The shell owns exactly two working-tree namespaces in a governed repository: `.pi/` (substrate-native runtime assets — extensions, when tier 1 lands) and `.ghjig/` (per-clone untracked state — the shell binding, never committed). Repository-visible substrate lives in standard platform locations: `.github/` (templates, workflows), `.githooks/` (the local tier), `changelog_unreleased/` (the fragment tree). The shell installs nothing into a namespace owned by other tooling, and enforced behavior never depends on such a namespace existing.
+
+The local tier's delegated helpers (§3.2) are committed at `.githooks/helpers/` — a subdirectory of the standard location above, so the placement mints no third shell-owned namespace. The subdirectory is inert to the layer that hosts it: git executes only the top-level hook-named files of a configured hooks path, so nothing under `helpers/` runs except through an adapter's delegation. Committing the helpers adds no resolution path: an adapter reaches a helper directory only through the per-clone untracked binding (§3.2), which a clone may point anywhere — `.githooks/helpers/` is where the bytes live, not how they are found — and those bytes are clone-independent per §4.2, with anything clone-specific still generated under `.ghjig/`.
 
 ### 4.2 Target-parameterization
 
