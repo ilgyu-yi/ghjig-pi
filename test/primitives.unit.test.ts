@@ -192,28 +192,6 @@ describe("audit primitive: one-line encoded records (§5.5)", () => {
 describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", () => {
 	const INPUT = { category: "test", action: "sink", text: "evidence" };
 
-	/**
-	 * The clause reader below delimits a path at whitespace, so on a host
-	 * whose temporary directory carries whitespace it reads a TRUNCATED
-	 * path — and the arms that perform what a clause names then either act
-	 * on something the fixture does not own or refuse a clause production
-	 * emitted correctly. Both are results about the host, not about the
-	 * code under test (§3.12), so those arms measure nothing here and say
-	 * so rather than reporting a red the clause did not earn.
-	 *
-	 * Widening the reader is not the fix available: the whitespace IS the
-	 * only signal saying where the path production named ends, and ending
-	 * it instead at whatever happens to exist on disk would repair the
-	 * clause toward what the arm hoped to read — the one move these arms
-	 * exist to refuse. Delimiting the path in the production message would
-	 * fix it at the source, for the operator pasting it into a shell as
-	 * much as for this reader; that is a change to operator-facing text
-	 * and is not made here.
-	 */
-	const CLAUSE_PATH_UNREADABLE: string | false = /\s/.test(tmpdir())
-		? "the fixture base path carries whitespace, which the recovery-clause reader cannot delimit"
-		: false;
-
 	/** The recovery clause of a degradation signal, if the signal carries one. */
 	function recoveryClause(warning: string): string | undefined {
 		return /Recovery:\s*(.+)$/s.exec(warning)?.[1];
@@ -224,12 +202,15 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	 * rather than matching its prose needs one machine-readable handle on
 	 * it, and a clause naming the wrong object is exactly what these arms
 	 * are for: the handle is read raw, never repaired toward whatever the
-	 * arm was hoping for. Absolute-path shape is POSIX here; a host with
-	 * another path grammar needs this reader widened, not the contract.
+	 * arm was hoping for. Every clause delimits the path it names as a
+	 * JSON string (`quoted()` at the source, issue #47), so the handle is
+	 * the clause's first JSON-string production, decoded — the quotes say
+	 * exactly where the path ends, which is what lets these arms run on a
+	 * host whose temporary directory carries whitespace.
 	 */
 	function pathNamedIn(clause: string): string | undefined {
-		const found = /(\/[^\s'"`]+)/.exec(clause)?.[1];
-		return found === undefined ? undefined : found.replace(/[.,;:)'"`]+$/, "");
+		const found = /"(?:[^"\\]|\\.)*"/.exec(clause)?.[0];
+		return found === undefined ? undefined : (JSON.parse(found) as string);
 	}
 
 	/**
@@ -694,9 +675,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		}
 	});
 
-	it("names a recovery that is live at this surface: performing it restores the trail (§3.11)", {
-		skip: CLAUSE_PATH_UNREADABLE,
-	}, () => {
+	it("names a recovery that is live at this surface: performing it restores the trail (§3.11)", () => {
 		// Asserted by running the recovery, not by matching its prose: the arm
 		// creates the destination the signal names and appends again. A signal
 		// naming a recovery that does not restore the trail is worse than one
@@ -727,9 +706,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		}
 	});
 
-	it("names a live recovery when an ancestor of the destination is a plain file (§3.11)", {
-		skip: CLAUSE_PATH_UNREADABLE,
-	}, () => {
+	it("names a live recovery when an ancestor of the destination is a plain file (§3.11)", () => {
 		// `<repo>/.ghjig` existing as a file is an honest mistake, not a hostile
 		// one, so this arm is owed a live recovery. Nothing can be created
 		// beneath a plain file, so a clause naming the sink path prescribes an
@@ -769,12 +746,11 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// superuser the directory refuses nothing, so the arm would measure the
 		// message against a failure that never occurred.
 		skip:
-			CLAUSE_PATH_UNREADABLE ||
-			(process.platform === "win32"
+			process.platform === "win32"
 				? "POSIX permission bits"
 				: process.getuid?.() === 0
 					? "the directory mode refuses nothing for this account"
-					: false),
+					: false,
 	}, () => {
 		// `.ghjig/state` created with restrictive permissions is an honest
 		// mistake. The sink does not exist and cannot be created, so a clause
@@ -808,17 +784,12 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	});
 
 	it("keeps the destination-mode recovery off the unsearchable-ancestor shape (§3.11)", {
-		// The whitespace condition is disqualifying here for the opposite
-		// reason to the performing arms: a truncated parse makes this arm's
-		// `notEqual` pass on any clause at all, so it would report a green it
-		// did not measure.
 		skip:
-			CLAUSE_PATH_UNREADABLE ||
-			(process.platform === "win32"
+			process.platform === "win32"
 				? "POSIX permission bits"
 				: process.getuid?.() === 0
 					? "the directory mode refuses nothing for this account"
-					: false),
+					: false,
 	}, () => {
 		// An ANCESTOR of the destination refuses the search, so the destination
 		// cannot be measured at all — and its own mode already admits this
@@ -849,12 +820,11 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 
 	it("names a live recovery when the sink's own mode refuses the append (§3.11)", {
 		skip:
-			CLAUSE_PATH_UNREADABLE ||
-			(process.platform === "win32"
+			process.platform === "win32"
 				? "POSIX permission bits"
 				: process.getuid?.() === 0
 					? "the sink mode refuses nothing for this account"
-					: false),
+					: false,
 	}, () => {
 		// The destination directory admits this account and the sink is there:
 		// only the sink's own mode refuses. The live object is that file, and a
