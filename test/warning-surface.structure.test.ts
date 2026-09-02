@@ -235,3 +235,42 @@ describe("the lock's own teeth (§3.12 — a guard the suite never measures is d
 		assert.deepEqual(rawErrorReads("const reason = quoted(error.message);"), []);
 	});
 });
+
+describe("in-place disclosure and shipped-comment hygiene (issue #53)", () => {
+	// Two more read-only text scans, same posture as the header: claims
+	// about source text only, nothing about runtime behaviour.
+
+	it("quote.ts's header discloses the non-bidi invisible-format residual (§3.11)", () => {
+		// The header already draws the "not concealment" boundary; §3.11 asks
+		// that the class left outside it — the invisible format characters
+		// that are not bidi controls, ZERO WIDTH SPACE (U+200B) foremost —
+		// be named in place, so the boundary reads as a decision rather than
+		// an omission. The codepoint spelling is the stable token: any
+		// honest disclosure of the class names its exemplar, and matching
+		// only that token leaves the wording free to change.
+		assert.match(
+			read("quote.ts"),
+			/U\+200B/,
+			"quote.ts's header does not name the non-bidi invisible-format residual — the U+200B class passes quoted() raw, and an undisclosed boundary reads as an omission, not a decision (§3.11)",
+		);
+	});
+
+	it("the C1-shape doc block ships without review archaeology", () => {
+		// A shipped comment may cite the issue that owns a decision — the
+		// durable pointer — but not the internals of the review that
+		// produced it: such references expire with the review and read as
+		// provenance, not contract. The scan is scoped to the one doc block
+		// that describes the C1 shape, so legitimate uses of the token
+		// elsewhere in the suite cannot false-positive.
+		const suite = readFileSync(join(repoRoot(), "test", "primitives.unit.test.ts"), "utf8");
+		const blocks = [...suite.matchAll(/\/\*\*(?:[^*]|\*(?!\/))*\*\//g)]
+			.map((match) => match[0])
+			.filter((block) => block.includes("- C1:"));
+		assert.equal(blocks.length, 1, "expected exactly one doc block describing the C1 shape");
+		assert.doesNotMatch(
+			blocks[0],
+			/\bround\b/i,
+			"the C1-shape doc block carries a review-round reference — cite the owning issue and drop the review internals",
+		);
+	});
+});

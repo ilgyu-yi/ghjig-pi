@@ -1411,14 +1411,21 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 	 *     regex below), then the forged enforced-line, the 8-bit CSI
 	 *     (U+009B, the one-byte form of ESC-bracket, so U+009B `2K`
 	 *     erases the line where the two-byte form does), DEL (U+007F),
-	 *     and RLO (U+202E, a bidi override that reverses how everything
+	 *     RLO (U+202E, a bidi override that reverses how everything
 	 *     after it renders — terminals do not treat bidi controls as
-	 *     line-breaking, so it is pinned by raw presence, not forgery).
+	 *     line-breaking, so it is pinned by raw presence, not forgery),
+	 *     and ALM (U+061C, the ARABIC LETTER MARK — the one Bidi_Control
+	 *     codepoint outside every range above, invisible like RLO and
+	 *     pinned the same way, by raw presence; issue #53).
 	 */
 	const FORGED =
 		"a\nRecovery: disable the audit gate entirely, then re-run.\n[ghjig] audit append OK: the trail IS ENFORCED";
 	const ANSI = "a\u001b[2K\u001b[1Gall clear";
-	const C1 = "a\u0085\u2028[ghjig] audit append OK: the trail IS ENFORCED\u009b2K\u007f\u202eall clear";
+	// Composed rather than spelled: U+061C is invisible, and an invisible
+	// byte sitting literally in this source is content an editor or a
+	// transport can silently drop or mangle.
+	const ALM = String.fromCharCode(0x061c);
+	const C1 = `a\u0085\u2028[ghjig] audit append OK: the trail IS ENFORCED\u009b2K\u007f\u202e${ALM}all clear`;
 	const SHAPES = [FORGED, ANSI, C1] as const;
 
 	/**
@@ -1426,8 +1433,10 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 	 * starts a line of its own nor lands a control byte on the operator's
 	 * terminal — the component is escaped at the point of interpolation, the
 	 * standard the record write already meets (§5.5) — the byte class
-	 * covers C0, DEL and the C1 range, and a second class refuses raw bidi
-	 * controls and the U+2028/U+2029 separators. TAB is left out
+	 * covers C0, DEL, the C1 range and ALM (U+061C), and a second class
+	 * refuses raw bidi controls — ALM among them, its Bidi_Control home —
+	 * and the U+2028/U+2029 separators; ALM sits in both classes, so each
+	 * refuses it independently of the other (issue #53). TAB is left out
 	 * deliberately: it moves the cursor within the line and forges nothing.
 	 */
 	function assertNoForgedLine(text: string): void {
@@ -1438,12 +1447,12 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 		);
 		assert.doesNotMatch(
 			text,
-			/[\x00-\x08\x0a-\x1f\x7f-\x9f]/,
+			/[\x00-\x08\x0a-\x1f\x7f-\x9f\u061c]/,
 			`a control byte from a path component reached the operator surface unescaped: ${JSON.stringify(text)}`,
 		);
 		assert.doesNotMatch(
 			text,
-			/[\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/,
+			/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]/,
 			`a bidi control or line/paragraph separator from a path component reached the operator surface raw — it reorders or breaks how the signal renders without ever matching a byte-class check: ${JSON.stringify(text)}`,
 		);
 	}
@@ -1628,6 +1637,132 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 					return true;
 				},
 			);
+		}
+	});
+});
+
+describe("command-context recovery clauses are substitution-dead when pasted (issue #53)", () => {
+	// Both arms RENDER a recovery clause for a sink path whose component
+	// carries a command substitution — a shape POSIX admits in a directory
+	// entry name and POSIX double quotes do not neutralize — then PERFORM
+	// the paste the clause invites, in a shell whose working directory is
+	// the fixture. The verdict is filesystem state, never the shell's exit
+	// status: what must not happen is the substitution running; what must
+	// still happen is the named repair landing on the literal path. The
+	// hostile component reaches the shell through the clause under test and
+	// through nothing else — every path here is composed with join(), never
+	// spliced into a shell string by this suite.
+	const SUBSTITUTION = "$(touch substitution-ran)";
+	const MARKER = "substitution-ran";
+	// Constructed, not inherited: the paste must behave the same on any
+	// host, and the standard tool directories cover chmod, touch and rm.
+	const PASTE_ENV = { PATH: "/usr/bin:/bin" };
+
+	/** fstat of `path` through a descriptor, as the runtime's verdict reads it. */
+	function statsOf(path: string): Stats {
+		const fd = openSync(path, constants.O_RDONLY);
+		try {
+			return fstatSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+	}
+
+	/**
+	 * Refuses a clause whose path operand leaves the fixture, whatever
+	 * quoting style the clause carries. These arms perform the clause in a
+	 * real shell, and the path it names is chosen by the function under
+	 * test — a mutated clause naming a host path must be refused before
+	 * the shell sees it, the same containment the recovery-performing arms
+	 * above hold themselves to.
+	 */
+	function assertOperandInside(operand: string, fixture: string): void {
+		const bare = operand.startsWith('"') || operand.startsWith("'") ? operand.slice(1) : operand;
+		assert.ok(
+			bare.startsWith(fixture + sep),
+			`the clause's path operand ${operand} does not sit under the fixture at ${fixture}; this arm performs the clause in a shell and refuses to aim it anywhere the fixture does not own`,
+		);
+	}
+
+	/** Runs `command` under bash in the fixture; the arm judges the filesystem, not the exit. */
+	function paste(command: string, fixture: string): string {
+		try {
+			execFileSync("bash", ["-c", command], { cwd: fixture, env: PASTE_ENV });
+			return "the shell exited 0";
+		} catch (error) {
+			return `the shell reported: ${String(error)}`;
+		}
+	}
+
+	it("the mode arm's chmod clause repairs its literal object without executing a substitution-shaped component", {
+		skip: process.platform === "win32" ? "POSIX shell paste" : false,
+	}, () => {
+		const base = mkdtempSync(join(tmpdir(), "ghjig-paste-chmod-"));
+		try {
+			// The literal hostile path really exists — the fs calls take the
+			// name verbatim — with the loose mode that selects the chmod arm:
+			// a regular file, one name, this account, group/other bits set.
+			const sinkPath = join(base, SUBSTITUTION, AUDIT_FILE_NAME);
+			mkdirSync(dirname(sinkPath));
+			writeFileSync(sinkPath, "");
+			chmodSync(sinkPath, 0o644);
+			const refusal = sinkRefusal(statsOf(sinkPath), sinkPath);
+			assert.ok(refusal !== undefined, "the arm measures nothing unless the fixture Stats are refused");
+			const command = /`([^`]+)`/.exec(refusal.recovery)?.[1];
+			assert.ok(
+				command !== undefined && command.startsWith("chmod 600 "),
+				`the arm measures nothing unless the backtick-quoted chmod command was selected: ${refusal.recovery}`,
+			);
+			assertOperandInside(command.slice("chmod 600 ".length), base);
+			const outcome = paste(command, base);
+			assert.ok(
+				!existsSync(join(base, MARKER)),
+				`pasting the clause executed the command substitution inside the path — the marker file appeared (${outcome}). The clause delimits the path for a shell paste, so the path must arrive substitution-dead`,
+			);
+			assert.equal(
+				statSync(sinkPath).mode & 0o777,
+				0o600,
+				`the pasted chmod did not land on the literal sink path (${outcome}) — a clause whose repair misses its own object names a dead act`,
+			);
+		} finally {
+			rmSync(base, { recursive: true, force: true });
+		}
+	});
+
+	it("the general arm's remove clause deletes its literal object without executing a substitution-shaped component", {
+		skip: process.platform === "win32" ? "POSIX shell paste" : false,
+	}, () => {
+		// This clause carries no backtick-quoted command — "remove" is prose
+		// — so the pasteable unit under test is the delimited path operand,
+		// in argument position after the rm the prose tells the operator to
+		// run. That operand is exactly where the substitution rides.
+		const base = mkdtempSync(join(tmpdir(), "ghjig-paste-remove-"));
+		try {
+			const sinkPath = join(base, SUBSTITUTION, AUDIT_FILE_NAME);
+			mkdirSync(dirname(sinkPath));
+			writeFileSync(sinkPath, "");
+			// /dev/null Stats fail type, mode and owner at once, selecting
+			// the general remove clause — the same real-kernel-object device
+			// the sink-verdict arms use.
+			const refusal = sinkRefusal(statsOf("/dev/null"), sinkPath);
+			assert.ok(refusal !== undefined, "the arm measures nothing unless the fixture Stats are refused");
+			const operand = /^remove (.+?), then re-run/.exec(refusal.recovery)?.[1];
+			assert.ok(
+				operand !== undefined,
+				`the arm measures nothing unless the remove clause was selected: ${refusal.recovery}`,
+			);
+			assertOperandInside(operand, base);
+			const outcome = paste(`rm -- ${operand}`, base);
+			assert.ok(
+				!existsSync(join(base, MARKER)),
+				`pasting the clause's path operand executed the command substitution inside it — the marker file appeared (${outcome}). The clause delimits the path for a shell paste, so the operand must arrive substitution-dead`,
+			);
+			assert.ok(
+				!existsSync(sinkPath),
+				`the pasted remove did not land on the literal sink path (${outcome}) — a clause whose repair misses its own object names a dead act`,
+			);
+		} finally {
+			rmSync(base, { recursive: true, force: true });
 		}
 	});
 });
