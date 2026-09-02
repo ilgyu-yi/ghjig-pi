@@ -38,6 +38,7 @@
 import { realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { quoted } from "./quote.ts";
 
 /**
  * True iff `candidate` sits strictly below `ancestor` in the tree.
@@ -77,7 +78,7 @@ function isDirectory(path: string): boolean {
 export function locateRepoRootFrom(moduleFile: string): string {
 	if (!isAbsolute(moduleFile)) {
 		throw new Error(
-			`[ghjig] repo-root discovery cannot anchor the relative module path "${moduleFile}": ` +
+			`[ghjig] repo-root discovery cannot anchor the relative module path ${quoted(moduleFile)}: ` +
 				`resolution never consults the process working directory (§4.6), and a relative path ` +
 				`has no other anchor — answering would give a different repository root per directory. ` +
 				`Recovery: pass the installed module's absolute path ` +
@@ -93,8 +94,8 @@ export function locateRepoRootFrom(moduleFile: string): string {
 				return current;
 			}
 			console.warn(
-				`[ghjig] ignoring the .pi/ directory at ${current}: it sits below the install root ` +
-					`${structuralRoot}, so it cannot be the repository root — a repository binds at ` +
+				`[ghjig] ignoring the .pi/ directory at ${quoted(current)}: it sits below the install root ` +
+					`${quoted(structuralRoot)}, so it cannot be the repository root — a repository binds at ` +
 					`its root only, never recursively into subprojects (§4.7)`,
 			);
 		}
@@ -105,8 +106,8 @@ export function locateRepoRootFrom(moduleFile: string): string {
 		current = parent;
 	}
 	console.warn(
-		`[ghjig] repo-root discovery failed: no admissible .pi/ ancestor above ${moduleFile}; ` +
-			`degrading open to the structural root ${structuralRoot} (§3.9)`,
+		`[ghjig] repo-root discovery failed: no admissible .pi/ ancestor above ${quoted(moduleFile)}; ` +
+			`degrading open to the structural root ${quoted(structuralRoot)} (§3.9)`,
 	);
 	return structuralRoot;
 }
@@ -122,11 +123,13 @@ export function locateRepoRoot(): string {
 	try {
 		installed = realpathSync(self);
 	} catch (error) {
-		const reason = error instanceof Error ? error.message : String(error);
+		// Escaped at the extraction (issue #47): a filesystem error message
+		// embeds the failing path verbatim, so the cause is interpolated
+		// through `quoted` exactly as the path itself is.
 		console.warn(
-			`[ghjig] could not resolve the installed module path ${self} through its links; ` +
+			`[ghjig] could not resolve the installed module path ${quoted(self)} through its links; ` +
 				`locating from the unresolved path instead, which mislocates the repository root if ` +
-				`the install is a symlink (§3.9). Cause: ${reason}. ` +
+				`the install is a symlink (§3.9). Cause: ${quoted(error instanceof Error ? error.message : String(error))}. ` +
 				`Recovery: restore read access to every directory on that path, then start a new session.`,
 		);
 	}

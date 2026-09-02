@@ -106,6 +106,11 @@ const SOURCES: readonly { file: string; allow: readonly string[] }[] = [
 			// The seam's NAME is a constant of this module, not a value an
 			// actor supplies.
 			"STATE_SEAM",
+			// The empty-seam rendering: the only branch that reaches the
+			// message unquoted is the string constant "empty value" — the
+			// seam itself passes through quoted() — so no actor byte rides
+			// this expression raw.
+			'seam === "" ? "empty value" : quoted(seam)',
 			// The shared recovery clause: a carrier composed of STATE_SEAM and
 			// fixed prose, escaped nowhere because it carries no path.
 			"RECOVERY",
