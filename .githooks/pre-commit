@@ -2,17 +2,17 @@
 # .githooks/pre-commit — local-tier adapter. Blocks a direct commit
 # to a protected branch and a staged secret by SOURCING and CALLING the shared
 # helpers — it copies NO check logic (single-source invariant).
+# Arm ordering is load-bearing: each arm's helper is sourced immediately
+# before that arm runs, so a missing or incomplete helper degrades ONLY the
+# arms behind it — never a neighbour that already has everything it needs.
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
-githook_source branch_guard.sh branch || exit 0
-githook_source secret_scan.sh  secret || exit 0
-githook_require current_branch
-githook_require is_protected_branch
-githook_require scan_staged_secrets
-
 # 1) Direct commit to the one derived protected identity P (SPEC 3.3's
 #    ref-identity semantics; master/release/* stay enumerated-unmodeled).
+githook_source branch_guard.sh branch || exit 0
+githook_require current_branch
+githook_require is_protected_branch
 _gh_branch="$(current_branch)"
 if is_protected_branch "$_gh_branch"; then
   githook_block branch "pre-commit: direct commit to the protected branch is blocked. Commit on a feature branch and open a PR."
@@ -20,6 +20,8 @@ if is_protected_branch "$_gh_branch"; then
 fi
 
 # 2) Staged secret (scan_staged_secrets reads git diff --cached).
+githook_source secret_scan.sh  secret || exit 0
+githook_require scan_staged_secrets
 if ! scan_staged_secrets; then
   githook_block secret "pre-commit: the staged-secret scan refused this commit. Remove the flagged content, or allow-list the path in .shellsecretignore."
   exit 1

@@ -1,0 +1,4 @@
+# The pattern file is byte-addressed data both readers must agree on
+# (SPEC 3.3 rule source): no eol or text conversion may rewrite the
+# committed bytes at checkout.
+secret-patterns -text

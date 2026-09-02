@@ -366,6 +366,61 @@ describe("staged-secret refusals, one arm per pattern (issue #66)", { skip: IS_W
 		}
 	});
 
+	it("a CRLF-rendered pattern file still refuses (checkout-smudge cannot dud the pattern set)", () => {
+		// core.autocrlf=true smudges the checked-out pattern file to CRLF
+		// rows with no actor editing anything; each ERE then carries a
+		// trailing CR that compiles cleanly yet can never match an
+		// LF-terminated added line — an armed-looking scan that checks
+		// nothing, with zero records. The parser strips the trailing CR, so
+		// the smudged file scans exactly as the committed bytes.
+		const fixture = buildScanFixture();
+		try {
+			writeFileSync(
+				fixturePatternsPath(fixture),
+				PLANNED_PATTERNS.map(([id, ere]) => `${id}\t${ere}`).join("\r\n") + "\r\n",
+			);
+			stageFile(fixture, "zqleakcrlf.txt", AWS_SECRET + "\n");
+			const attempt = commitWithMessage(fixture, "chore: exercise the CRLF-pattern-file arm\n");
+			assertSecretRefused(attempt, "aws-access-key-id", "zqleakcrlf.txt", AWS_SECRET, "CRLF pattern file");
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("a worktree file named HEAD cannot disarm the scan (rev/path disambiguation)", () => {
+		// Without an argv terminator after the diff base, a worktree file
+		// named HEAD makes git refuse the rev/path ambiguity — and an
+		// enumeration failure is the machinery arm, so the whole scan would
+		// disarm OPEN on a file any actor can create with no flag and no
+		// env. The enumeration's base must be terminated with `--`.
+		const fixture = buildScanFixture();
+		try {
+			stageFile(fixture, "HEAD", "ordinary text\n");
+			stageFile(fixture, "zqleakhead.txt", AWS_SECRET + "\n");
+			const attempt = commitWithMessage(fixture, "chore: exercise the HEAD-file arm\n");
+			assertSecretRefused(attempt, "aws-access-key-id", "zqleakhead.txt", AWS_SECRET, "HEAD-file path");
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("an inherited unusable TMPDIR cannot disarm the scan (spool falls back to the git dir)", () => {
+		// The enumeration spool must not turn the ambient temp dir into a
+		// disarm lever: with TMPDIR pointing nowhere, the spool lands under
+		// the repository's own git dir — writable at commit time — and the
+		// staged secret is still refused.
+		const fixture = buildScanFixture();
+		try {
+			stageFile(fixture, "zqleaktmp.txt", AWS_SECRET + "\n");
+			const attempt = commitWithMessage(fixture, "chore: exercise the hostile-TMPDIR arm\n", {
+				env: { TMPDIR: "/nonexistent-zqtmpdir" },
+			});
+			assertSecretRefused(attempt, "aws-access-key-id", "zqleaktmp.txt", AWS_SECRET, "hostile TMPDIR");
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
 	it("a refs/replace graft on HEAD cannot blind the staged diff (replace-neutral measurement)", () => {
 		// A replace ref makes ordinary object reads resolve HEAD to a graft
 		// of the actor's choosing: planting the secret's bytes in the graft
@@ -837,11 +892,13 @@ describe("boundary pins — green in both tree states (issue #66)", { skip: IS_W
 		}
 	});
 
-	it("helper present without scan_staged_secrets: the whole hook no-ops open via githook_require", () => {
-		// The custom helper dir carries the REAL branch_guard.sh (so the
-		// require chain reaches the scan function's own guard) plus a stub
-		// secret_scan.sh that defines everything except the delegated
-		// function.
+	it("helper present without scan_staged_secrets: the branch arm still decides — only the secret arm degrades", () => {
+		// Per-arm degradation: the custom helper dir carries the REAL
+		// branch_guard.sh plus a stub secret_scan.sh that defines everything
+		// except the delegated function. HEAD sits on the derived protected
+		// identity, so the branch arm — whose helper is complete — must
+		// refuse this commit; a stale secret helper never folds the
+		// neighbour that already has everything it needs.
 		const fixture = buildGithookFixture({
 			helpersRelative: "helpers-stub",
 			remote: { defaultBranch: PROTECTED },
@@ -856,17 +913,20 @@ describe("boundary pins — green in both tree states (issue #66)", { skip: IS_W
 				"# stub helper: sources cleanly, defines everything except the delegated function\nunrelated_scan_function() { :; }\n",
 			);
 			stageFile(fixture, "zqnoop2.txt", AWS_SECRET + "\n");
-			const attempt = commitWithMessage(fixture, "chore: exercise the missing-function no-op\n");
-			assert.equal(
-				attempt.status,
-				0,
-				`a helper without the delegated function must degrade to allow via githook_require: ${attempt.stderr}`,
-			);
-			assert.doesNotMatch(
+			const attempt = commitWithMessage(fixture, "chore: exercise the per-arm degradation pin\n");
+			assert.match(
 				attempt.auditDelta,
-				/\bblock\b/,
-				`missing function: a no-op appended a block record; delta: ${JSON.stringify(attempt.auditDelta)}`,
+				/\bblock\b.*\bbranch\b/,
+				`stub secret helper: the branch arm did not refuse a commit on P — an incomplete secret helper ` +
+					`folded the armed neighbour (per-arm degradation, §3.9); delta: ${JSON.stringify(attempt.auditDelta)}`,
 			);
+			assert.notEqual(attempt.status, 0, "stub secret helper: the commit on P SUCCEEDED");
+			assert.match(
+				attempt.stderr,
+				/\[dev-shell\]/,
+				"stub secret helper: the branch refusal reached the operator without the adapter's recovery line",
+			);
+			assertBytesReachNoSurface(attempt, AWS_SECRET, "the staged secret's bytes", "stub secret helper");
 		} finally {
 			removeGithookFixture(fixture);
 		}

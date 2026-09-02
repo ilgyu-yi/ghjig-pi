@@ -232,6 +232,11 @@ scan_staged_secrets() {
 	local _ss_n=0 _ss_bad=0 _ss_row _ss_id _ss_ere _ss_stripped
 	local _ss_id_re='^[a-z][a-z0-9-]*$'
 	while IFS= read -r _ss_row || [ -n "$_ss_row" ]; do
+		# A trailing carriage return is a checkout-smudge artifact
+		# (core.autocrlf), not row content: unstripped it rides the ERE,
+		# which then compiles cleanly yet can never match an LF-terminated
+		# added line — an armed-looking scan that checks nothing (§3.10).
+		_ss_row="${_ss_row%$'\r'}"
 		case "$_ss_row" in
 		'#'*) continue ;;
 		esac
@@ -289,14 +294,27 @@ scan_staged_secrets() {
 	# reads the same bytes whose exit status was checked here. A second
 	# enumeration inside a process substitution would fail invisibly —
 	# streaming an empty list and allowing with zero records, the silent
-	# shape §3.9's degradation-signal rule forbids.
-	local _ss_list
-	_ss_list="$(mktemp "${TMPDIR:-/tmp}/ghjig-secret-scan.XXXXXX" 2>/dev/null </dev/null)" || _ss_list=""
+	# shape §3.9's degradation-signal rule forbids. Spool home: the
+	# repository's own git dir first (writable at commit time), the ambient
+	# temp dir as fallback — an inherited TMPDIR must not become a disarm
+	# lever (§3.3's env-neutrality ground, via the spool rather than the
+	# diff). The base is `--`-terminated: a worktree file named HEAD would
+	# otherwise make the argv ambiguous, and an enumeration failure is the
+	# machinery arm — a disarm any actor could mint with one file.
+	local _ss_list _ss_gd
+	_ss_gd="$(git rev-parse --git-dir 2>/dev/null </dev/null)" || _ss_gd=""
+	_ss_list=""
+	if [ -n "$_ss_gd" ] && [ -d "$_ss_gd" ]; then
+		_ss_list="$(mktemp "$_ss_gd/ghjig-secret-scan.XXXXXX" 2>/dev/null </dev/null)" || _ss_list=""
+	fi
 	if [ -z "$_ss_list" ]; then
-		_ghjig_ss_disarm 'staged path enumeration failed'
+		_ss_list="$(mktemp "${TMPDIR:-/tmp}/ghjig-secret-scan.XXXXXX" 2>/dev/null </dev/null)" || _ss_list=""
+	fi
+	if [ -z "$_ss_list" ]; then
+		_ghjig_ss_disarm 'staged-path enumeration spool unavailable'
 		return 0
 	fi
-	if ! _ghjig_ss_git_diff --cached --name-only -z "$_ss_base" >"$_ss_list" 2>/dev/null </dev/null; then
+	if ! _ghjig_ss_git_diff --cached --name-only -z "$_ss_base" -- >"$_ss_list" 2>/dev/null </dev/null; then
 		rm -f -- "$_ss_list"
 		_ghjig_ss_disarm 'staged path enumeration failed'
 		return 0
