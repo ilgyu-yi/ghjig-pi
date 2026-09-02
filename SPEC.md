@@ -41,29 +41,29 @@ This document is the repository's behavioural SSOT: every enforced norm, gate cl
 | &nbsp;&nbsp;§3.7 | Approval-gate completeness | 378 |
 | &nbsp;&nbsp;§3.8 | Escape architecture | 390 |
 | &nbsp;&nbsp;§3.9 | Fail policy | 403 |
-| &nbsp;&nbsp;§3.10 | Delegated computation | 415 |
-| &nbsp;&nbsp;§3.11 | Gate design | 425 |
-| &nbsp;&nbsp;§3.12 | Gate verification | 447 |
-| §4 | Substrate and install contract | 457 |
-| &nbsp;&nbsp;§4.1 | Namespaces | 461 |
-| &nbsp;&nbsp;§4.2 | Target-parameterization | 467 |
-| &nbsp;&nbsp;§4.3 | PR-based installs | 471 |
-| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 475 |
-| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 479 |
-| &nbsp;&nbsp;§4.6 | Binding and resolution | 485 |
-| &nbsp;&nbsp;§4.7 | Host boundary | 495 |
-| §5 | Cross-cutting contracts | 503 |
-| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 507 |
-| &nbsp;&nbsp;§5.2 | Graceful degradation | 511 |
-| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 515 |
-| &nbsp;&nbsp;§5.4 | Work language | 519 |
-| &nbsp;&nbsp;§5.5 | State boundary | 523 |
-| &nbsp;&nbsp;§5.6 | Operating modes | 529 |
-| &nbsp;&nbsp;§5.7 | Unattended conduct | 539 |
-| &nbsp;&nbsp;§5.8 | Context lifecycle | 549 |
-| &nbsp;&nbsp;§5.9 | Session surfaces | 557 |
-| §6 | Self-governance milestone | 565 |
-| &nbsp;&nbsp;§6.1 | Substrate posture | 576 |
+| &nbsp;&nbsp;§3.10 | Delegated computation | 417 |
+| &nbsp;&nbsp;§3.11 | Gate design | 427 |
+| &nbsp;&nbsp;§3.12 | Gate verification | 449 |
+| §4 | Substrate and install contract | 459 |
+| &nbsp;&nbsp;§4.1 | Namespaces | 463 |
+| &nbsp;&nbsp;§4.2 | Target-parameterization | 469 |
+| &nbsp;&nbsp;§4.3 | PR-based installs | 473 |
+| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 477 |
+| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 481 |
+| &nbsp;&nbsp;§4.6 | Binding and resolution | 487 |
+| &nbsp;&nbsp;§4.7 | Host boundary | 497 |
+| §5 | Cross-cutting contracts | 505 |
+| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 509 |
+| &nbsp;&nbsp;§5.2 | Graceful degradation | 513 |
+| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 517 |
+| &nbsp;&nbsp;§5.4 | Work language | 521 |
+| &nbsp;&nbsp;§5.5 | State boundary | 525 |
+| &nbsp;&nbsp;§5.6 | Operating modes | 531 |
+| &nbsp;&nbsp;§5.7 | Unattended conduct | 541 |
+| &nbsp;&nbsp;§5.8 | Context lifecycle | 551 |
+| &nbsp;&nbsp;§5.9 | Session surfaces | 559 |
+| §6 | Self-governance milestone | 567 |
+| &nbsp;&nbsp;§6.1 | Substrate posture | 578 |
 <!-- TOC END -->
 
 ## 0. Intent and scope
@@ -403,6 +403,8 @@ The norm is **procedural today**, enforced at review (§2.3); escape instruments
 ### 3.9 Fail policy
 
 Every dependency the enforcement layer stands on declares its on-miss posture in **one inventory**: the default is fail-open, and each entry flipped to fail-closed carries its own justification in the same place. A security-relevant entry that fails open says **"not enforced"** plainly in its degradation signal — a reader must never mistake a disarmed gate for a passing one. The posture keys on **which failure occurred, not which component failed**: a dependency that is *absent* means the enforcement was never installed — the acting party is not the cause and cannot repair it from inside a block, so it fails open with a warning; a dependency that is *present but cannot measure* is being asked to vouch for something it did not measure, so it fails closed. One component may legitimately carry both postures, one per failure shape. The keying rule allocates postures **within a gate whose declared fail direction is closed**; an advisory-face tier (§3.2's tier 2, §5.2's best-effort aids) stays fail-open on every failure shape — §5.2's aids-versus-evidence-gates split is the home this inventory implements.
+
+The carve-out's scope is the tier's own machinery, not its predicates' inputs: what stays fail-open on every failure shape is degradation of the enforcement chain — an absent binding, helper, or delegated function, which the acting party did not cause and cannot repair from inside a block. A live tier-2 predicate handed an input it cannot measure refuses per this section's measurement rule, whatever the tier's face: the input is the actor's own, the repair is theirs, and the tier's escape stands open beneath the refusal. **Unmeasurable** covers both shapes: a degraded measurement environment, and an out-of-domain input — a subject whose bytes are not valid in the measuring charmap has no codepoint count, and a naive length that returns a confident decimal over such bytes is not a measurement. The refusal's cause and audit record are content-free: the arm name and the measured decimal where one exists, never the subject bytes (§3.8's refusal-record rule; §3.11's hostile-arm terseness).
 
 **One inventory, one home.** The inventory lives at `.pi/extensions/ghjig/postures.ts` and covers every dependency the enforcement layer stands on — all three tiers, not only the runtime that hosts the file. Posture rows are declarative data carrying their justification in place, read by reviewers and checks, never resolved at decision time by the components they describe: a tier whose postures are compiled into its own control flow (the local tier's fail-open chain, §3.2) is inventoried there with no runtime reader owed, so one home serves the layer without a cross-runtime dependency. A posture declared in a shipped enforcement source outside that file is a second home for the property — §3.11's divergence surface, not redundancy — and the home binds under §6.1's inventory rule through a structural check that fails on exactly that shape.
 
