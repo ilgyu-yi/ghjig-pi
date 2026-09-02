@@ -1404,8 +1404,8 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 	 *   - ANSI: `ESC[2K` erases the line and `ESC[1G` returns the cursor to
 	 *     column 1, so on a terminal the disarmed-gate warning renders as
 	 *     whatever the component says next.
-	 *   - C1: what the raw `JSON.stringify` never escaped (issue #47,
-	 *     round 1) — NEL (U+0085, a line break on NEL-honouring
+	 *   - C1: what the raw `JSON.stringify` never escaped (issue #47) —
+	 *     NEL (U+0085, a line break on NEL-honouring
 	 *     terminals), LINE SEPARATOR (U+2028, a JavaScript line
 	 *     terminator, so the forged line after it anchors the multiline
 	 *     regex below), then the forged enforced-line, the 8-bit CSI
