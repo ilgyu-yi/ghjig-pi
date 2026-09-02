@@ -38,9 +38,10 @@
 #     SANITIZED path and never the matched bytes or raw path bytes (§3.8).
 #
 # Path sanitization (stated choice): every byte outside printable ASCII,
-# plus '%' itself, is percent-encoded (%XX, uppercase hex) before the path
+# plus '%' itself and the single quote (the record's own path-field
+# delimiter), is percent-encoded (%XX, uppercase hex) before the path
 # reaches any record sink — `githook_block` and `audit_log` interpolate
-# raw, and a hostile filename must not split or forge a record.
+# raw, and a hostile filename must not split a record or forge its fields.
 #
 # Allow-list: the repo-root `.shellsecretignore` is domain exclusion, never
 # approval — literal or shell-glob lines, `#` comments, absent means empty;
@@ -69,6 +70,9 @@ _ghjig_ss_sanitize_path() {
 		_ss_ch="${_ss_in:$_ss_i:1}"
 		case "$_ss_ch" in
 		'%') _ss_out="${_ss_out}%25" ;;
+		# The single quote is the record's own path-field delimiter: raw, it
+		# would terminate the quoted field early and forge its boundary.
+		\') _ss_out="${_ss_out}%27" ;;
 		[[:print:]]) _ss_out="${_ss_out}${_ss_ch}" ;;
 		*)
 			# The ordinal is masked to one byte before rendering: bash 3.2's
@@ -122,10 +126,15 @@ _ghjig_ss_refuse_unmeasurable() {
 # inherited GIT_*_PATHSPECS cell rewrites how the `:(literal)` pathspec
 # (and the enumeration it must agree with) is parsed — the measured object
 # is no more the environment's to rewrite than it is the clone config's
-# (§3.3's measurement-domain rule). Subshell form, bash-3.2-safe.
+# (§3.3's measurement-domain rule). Replace-object grafting is disabled on
+# the same ground: a local refs/replace ref resolves HEAD to a graft of
+# the actor's choosing, and a graft carrying the staged bytes empties the
+# measured diff. Subshell form, bash-3.2-safe.
 _ghjig_ss_git_diff() {
 	(
 		unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
+		GIT_NO_REPLACE_OBJECTS=1
+		export GIT_NO_REPLACE_OBJECTS
 		exec git diff "$@"
 	)
 }
@@ -276,7 +285,19 @@ scan_staged_secrets() {
 			return 0
 		fi
 	fi
-	if ! _ghjig_ss_git_diff --cached --name-only -z "$_ss_base" >/dev/null 2>&1 </dev/null; then
+	# Single-read enumeration, spooled to a temp file: the scan loop below
+	# reads the same bytes whose exit status was checked here. A second
+	# enumeration inside a process substitution would fail invisibly —
+	# streaming an empty list and allowing with zero records, the silent
+	# shape §3.9's degradation-signal rule forbids.
+	local _ss_list
+	_ss_list="$(mktemp "${TMPDIR:-/tmp}/ghjig-secret-scan.XXXXXX" 2>/dev/null </dev/null)" || _ss_list=""
+	if [ -z "$_ss_list" ]; then
+		_ghjig_ss_disarm 'staged path enumeration failed'
+		return 0
+	fi
+	if ! _ghjig_ss_git_diff --cached --name-only -z "$_ss_base" >"$_ss_list" 2>/dev/null </dev/null; then
+		rm -f -- "$_ss_list"
 		_ghjig_ss_disarm 'staged path enumeration failed'
 		return 0
 	fi
@@ -299,7 +320,7 @@ scan_staged_secrets() {
 		fi
 	fi
 
-	local _ss_path _ss_e _ss_skip
+	local _ss_path _ss_e _ss_skip _ss_verdict=0
 	while IFS= read -r -d '' _ss_path; do
 		_ss_skip=0
 		_ss_e=0
@@ -314,8 +335,12 @@ scan_staged_secrets() {
 			_ss_e=$((_ss_e + 1))
 		done
 		if [ "$_ss_skip" -eq 0 ]; then
-			_ghjig_ss_scan_path "$_ss_path" || return 1
+			if ! _ghjig_ss_scan_path "$_ss_path"; then
+				_ss_verdict=1
+				break
+			fi
 		fi
-	done < <(_ghjig_ss_git_diff --cached --name-only -z "$_ss_base" 2>/dev/null </dev/null)
-	return 0
+	done <"$_ss_list"
+	rm -f -- "$_ss_list"
+	return "$_ss_verdict"
 }

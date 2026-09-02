@@ -103,10 +103,11 @@ const PLANNED_PATTERNS: Array<[string, string]> = [
 ];
 
 // Hostile path material (record-integrity arm): a filename carrying a raw
-// newline and a raw ANSI escape, both from codepoints.
+// single quote (the record's own path-field delimiter), a raw newline, and
+// a raw ANSI escape, quote and controls from codepoints.
 const HOSTILE_HEAD = "zqhostA";
 const HOSTILE_TAIL = "zqhostB.txt";
-const HOSTILE_NAME = HOSTILE_HEAD + cp(0x0a) + cp(0x1b) + "[31m" + HOSTILE_TAIL;
+const HOSTILE_NAME = HOSTILE_HEAD + cp(0x27) + cp(0x0a) + cp(0x1b) + "[31m" + HOSTILE_TAIL;
 
 // High-byte path material (%XX-fidelity arm): U+00E9 lands on disk and in
 // the index as the UTF-8 pair 0xC3 0xA9 — two bytes ≥ 0x80 for the
@@ -360,6 +361,30 @@ describe("staged-secret refusals, one arm per pattern (issue #66)", { skip: IS_W
 				env: { GIT_LITERAL_PATHSPECS: "1" },
 			});
 			assertSecretRefused(attempt, "aws-access-key-id", "zqleakenv.txt", AWS_SECRET, "ambient pathspec env");
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("a refs/replace graft on HEAD cannot blind the staged diff (replace-neutral measurement)", () => {
+		// A replace ref makes ordinary object reads resolve HEAD to a graft
+		// of the actor's choosing: planting the secret's bytes in the graft
+		// empties the staged diff against it — a command-invisible
+		// repo-state bypass, unlike the tier's declared `--no-verify` door.
+		// The scan's git children run with replace grafting disabled, so the
+		// measured base is the real HEAD. The carrier commit below rides
+		// `--no-verify` on purpose: it IS the declared door, used here only
+		// to plant fixture state.
+		const fixture = buildScanFixture();
+		try {
+			stageFile(fixture, "zqreplace.txt", AWS_SECRET + "\n");
+			fixtureGit(fixture, ["commit", "-q", "--no-verify", "-m", "carrier: fixture-local plant"]);
+			fixtureGit(fixture, ["reset", "-q", "--hard", "HEAD~1"]);
+			fixtureGit(fixture, ["replace", "HEAD", "ORIG_HEAD"]);
+			stageFile(fixture, "zqreplace.txt", AWS_SECRET + "\n");
+			stageFile(fixture, "zqbenign.txt", "ordinary text\n");
+			const attempt = commitWithMessage(fixture, "chore: exercise the replace-graft arm\n");
+			assertSecretRefused(attempt, "aws-access-key-id", "zqreplace.txt", AWS_SECRET, "replace graft");
 		} finally {
 			removeGithookFixture(fixture);
 		}
@@ -621,6 +646,15 @@ describe("a hostile-named path cannot split or forge a record (issue #66, SPEC �
 				"hostile path: the record splits the path — its head and tail must sit on ONE record line",
 			);
 			assert.match(naming[0], /\bblock\b/, "hostile path: the path-naming record is the refusal's block record");
+			// The path's own quote renders as %27: a raw quote inside the
+			// quoted path field would terminate it early and forge the field
+			// for any quote-delimited reader.
+			assert.equal(
+				naming[0].includes(HOSTILE_HEAD + "%27"),
+				true,
+				`hostile path: the path's single quote is not percent-encoded on the record — a raw quote ` +
+					`forges the path field's boundary: ${JSON.stringify(naming[0])}`,
+			);
 		} finally {
 			removeGithookFixture(fixture);
 		}

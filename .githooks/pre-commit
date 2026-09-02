@@ -21,7 +21,7 @@ fi
 
 # 2) Staged secret (scan_staged_secrets reads git diff --cached).
 if ! scan_staged_secrets; then
-  githook_block secret "pre-commit: a possible secret in the staged diff was detected — commit blocked. Remove it, or allow-list the path in .shellsecretignore."
+  githook_block secret "pre-commit: the staged-secret scan refused this commit. Remove the flagged content, or allow-list the path in .shellsecretignore."
   exit 1
 fi
 
