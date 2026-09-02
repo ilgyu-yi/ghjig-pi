@@ -32,9 +32,10 @@
  *                   is bounded like any other (§4.6, §4.7) — and answering
  *                   rather than throwing when the filesystem refuses a
  *                   probe (§3.9 `repo-root-discovery`).
- *   - postures.ts — the §3.9 fail-posture inventory: exactly the three
- *                   shipped dependencies, each with a posture, and every
- *                   fail-closed row with an in-place justification.
+ *   - postures.ts — the §3.9 fail-posture inventory: exactly the shipped
+ *                   enforcement-layer rows, each keyed on a failure shape
+ *                   with a posture, and every fail-closed row with an
+ *                   in-place justification.
  *
  * One arm measures this suite rather than the runtime: the containment
  * guard the recovery arms perform behind is itself asserted, because a
@@ -1332,6 +1333,11 @@ describe("fail-posture inventory (§3.9)", () => {
 	it("declares exactly the shipped enforcement-layer rows, keyed on failure shape", () => {
 		assert.deepEqual(POSTURES.map((row) => `${row.dependency} → ${row.posture}`).sort(), [
 			"audit-append → open",
+			"branch-guard-derivation → open",
+			"branch-guard-derivation-fallback → closed",
+			"branch-guard-destination → closed",
+			"branch-guard-helper → open",
+			"branch-guard-helper → open",
 			"commit-format-helper → open",
 			"commit-format-helper → open",
 			"commit-format-measurement → closed",

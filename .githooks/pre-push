@@ -19,7 +19,7 @@ while read -r _gh_lref _gh_loid _gh_rref _gh_roid; do
   [ -n "${_gh_rref:-}" ] || continue
   _gh_target="${_gh_rref#refs/heads/}"
   if is_protected_branch "$_gh_target"; then
-    githook_block branch "pre-push: push to protected ref '$_gh_target' is blocked. Push a feature branch and open a PR."
+    githook_block branch "pre-push: a push targeting a protected ref is blocked (the predicate's cause line above names the arm; refnames stay off every surface, SPEC 3.9). Push a feature branch and open a PR."
     _gh_blocked=1
   fi
 done
