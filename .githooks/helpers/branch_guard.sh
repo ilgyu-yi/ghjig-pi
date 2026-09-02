@@ -11,12 +11,13 @@
 # refs/remotes/origin/HEAD`, prefix stripped). Stage 2 — only where stage 1
 # fails — measures the remote's advertised default (`git ls-remote --symref
 # origin HEAD`, terminal prompts disabled), a measurement, never a guess
-# (§3.9's loader rule). Stage 2 is keyed to the push surface alone: the
-# executing hook's own name (`$0` basename `pre-push`) is the key, so the
-# commit surface — and any other caller, including a direct source — never
-# opens a network connection (§3.3's reachability clause; the keying's
-# residual is that a surface renamed away from `pre-push` loses stage 2,
-# never gains it). Stage-2 failure is keyed by outcome, not cause (§3.10):
+# (§3.9's loader rule). Stage 2 is keyed on the executing script's own
+# name (`$0` basename `pre-push`) — a name, not the installed hook — so a
+# caller whose basename is anything else, the commit surface included,
+# never opens a network connection, while a caller NAMED `pre-push` gains
+# stage 2 (§3.3's reachability clause; the keying's residuals run both
+# ways: renamed away loses stage 2, named into it gains only a read the
+# caller could run directly). Stage-2 failure is keyed by outcome (§3.10):
 # non-zero exit, or empty/unparseable output — a dangling remote HEAD
 # yields empty output with exit 0.
 #
@@ -47,6 +48,13 @@
 # re-decided here. Every git call reads stdin from /dev/null: the pre-push
 # adapter's while-read loop over stdin is load-bearing, and a child that
 # gulps stdin would silently starve it.
+
+# The derivation cache is process state, never inherited state: git hands
+# the pusher's environment to hooks, so an exported _GHJIG_BG_* pair could
+# otherwise pre-seed the verdict (a traceless disarm, a decoy identity, or
+# a set -u abort). Sourcing precedes every call, so discarding inherited
+# values here preserves the per-invocation cache while closing the seed.
+unset -v _GHJIG_BG_STATE _GHJIG_BG_P
 
 # current_branch — total function (§3.9): prints the valid short branch
 # name, or prints nothing and fails on a detached HEAD — no consumer reads
@@ -104,7 +112,7 @@ _ghjig_bg_derive() {
 
 	_GHJIG_BG_STATE=disarmed
 	if command -v audit_log >/dev/null 2>&1; then
-		( audit_log warn branch not-enforced 'protected-branch gate not enforced: protected identity underivable (both derivation stages failed)' ) >/dev/null 2>&1 || true
+		( audit_log warn branch not-enforced 'protected-branch gate not enforced: protected identity underivable (both derivation stages failed)' ) </dev/null >/dev/null 2>&1 || true
 	fi
 	return 1
 }
