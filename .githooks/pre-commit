@@ -11,7 +11,8 @@ githook_require current_branch
 githook_require is_protected_branch
 githook_require scan_staged_secrets
 
-# 1) Direct commit to a protected branch (main/master/release/*).
+# 1) Direct commit to the one derived protected identity P (SPEC 3.3's
+#    ref-identity semantics; master/release/* stay enumerated-unmodeled).
 _gh_branch="$(current_branch)"
 if is_protected_branch "$_gh_branch"; then
   githook_block branch "pre-commit: direct commit to protected branch '${_gh_branch:-HEAD}' is blocked. Commit on a feature branch and open a PR."

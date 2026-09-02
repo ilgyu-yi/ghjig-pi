@@ -26,11 +26,33 @@
  *
  * The commit environment is CONSTRUCTED, never inherited wholesale: PATH is
  * passed through (git and bash must resolve), HOME is fixture-local,
- * gitconfig is repo-local only (`GIT_CONFIG_NOSYSTEM`), and the locale is
- * pinned to a multibyte-capable charmap (`en_US.UTF-8`) so codepoint
- * measurement has a defined baseline; an arm that needs a degraded
- * measurement environment overrides the locale explicitly on its own
- * commit. POSIX substrate only: suites that use this builder skip on win32.
+ * gitconfig is repo-local only (`GIT_CONFIG_NOSYSTEM`), terminal prompts are
+ * disabled (`GIT_TERMINAL_PROMPT=0` — no fixture operation may wait on a
+ * credential prompt), and the locale is pinned to a multibyte-capable
+ * charmap (`en_US.UTF-8`) so codepoint measurement has a defined baseline;
+ * an arm that needs a degraded measurement environment overrides the locale
+ * explicitly on its own commit. POSIX substrate only: suites that use this
+ * builder skip on win32.
+ *
+ * PUSH SUBSTRATE (issue #59). The `remote` option adds a fixture-local bare
+ * remote named `origin`, so push-shaped arms can drive `git push` through
+ * the committed `pre-push` adapter against a real receive end:
+ *
+ *   - `git init --bare` + `git remote add origin <path>` + one initial push
+ *     of the default branch, then `git remote set-head origin <name>` — in
+ *     that order, because `set-head` refuses until the tracking ref the
+ *     push creates exists (`git remote add` alone never writes
+ *     `refs/remotes/origin/HEAD`);
+ *   - `omitHeadPointer` skips the `set-head` step, leaving
+ *     `refs/remotes/origin/HEAD` absent — the clone-configuration shape a
+ *     manually-added remote carries (derivation-failure arms);
+ *   - `danglingRemoteHead` points the bare remote's own HEAD at a branch
+ *     that does not exist, after the initial push: `git ls-remote --symref
+ *     origin HEAD` then yields empty output with exit 0 — the
+ *     stage-2-failure shape keyed by outcome, not cause;
+ *   - the setup commit and setup push run with `--no-verify`: fixture
+ *     construction is substrate, never a measurement, and must not depend
+ *     on the chain state the arms are about to measure.
  */
 import { spawnSync } from "node:child_process";
 import {
@@ -67,6 +89,30 @@ export interface GithookFixtureOptions {
 	 * contents they author (absent helper, stub helper).
 	 */
 	helpersRelative?: string;
+	/** Add a fixture-local bare remote (see the header's push-substrate note). */
+	remote?: GithookRemoteOptions;
+}
+
+export interface GithookRemoteOptions {
+	/**
+	 * The branch the bare remote advertises as its default — the identity a
+	 * protected-branch predicate can derive. Suites choose a DISTINCTIVE
+	 * name (never `main`) so byte-level "this name reached no surface"
+	 * assertions cannot collide with incidental git output.
+	 */
+	defaultBranch: string;
+	/**
+	 * Skip `git remote set-head origin <name>`: `refs/remotes/origin/HEAD`
+	 * stays absent, as it does in any clone whose remote was added by
+	 * `git remote add` and never `clone`d or `set-head`ed.
+	 */
+	omitHeadPointer?: boolean;
+	/**
+	 * After the initial push, point the bare remote's HEAD at a branch that
+	 * does not exist: a subsequent `git ls-remote --symref origin HEAD`
+	 * yields empty output with exit 0.
+	 */
+	danglingRemoteHead?: boolean;
 }
 
 export interface CommitAttempt {
@@ -98,6 +144,7 @@ function baseEnv(fixture: GithookFixture): Record<string, string> {
 		PATH: process.env.PATH ?? "",
 		HOME: join(fixture.root, "home"),
 		GIT_CONFIG_NOSYSTEM: "1",
+		GIT_TERMINAL_PROMPT: "0",
 		LANG: "en_US.UTF-8",
 		LC_ALL: "en_US.UTF-8",
 	};
@@ -202,7 +249,47 @@ export function buildGithookFixture(options: GithookFixtureOptions = {}): Githoo
 			"",
 		].join("\n"),
 	);
+
+	if (options.remote) {
+		const { defaultBranch, omitHeadPointer, danglingRemoteHead } = options.remote;
+		// Rename the unborn branch BEFORE the first commit so the fixture's
+		// local default and the remote's advertised default share one name.
+		git(fixture, ["symbolic-ref", "HEAD", `refs/heads/${defaultBranch}`]);
+		seedLocalCommit(fixture);
+		const remotePath = join(root, "remote.git");
+		git(fixture, ["init", "-q", "--bare", remotePath]);
+		git(fixture, ["--git-dir", remotePath, "symbolic-ref", "HEAD", `refs/heads/${defaultBranch}`]);
+		git(fixture, ["remote", "add", "origin", remotePath]);
+		// --no-verify: substrate, not measurement (header note). This push
+		// also creates refs/remotes/origin/<defaultBranch>, the tracking ref
+		// set-head requires — the order below is load-bearing.
+		git(fixture, ["push", "--no-verify", "-q", "origin", defaultBranch]);
+		if (!omitHeadPointer) {
+			git(fixture, ["remote", "set-head", "origin", defaultBranch]);
+		}
+		if (danglingRemoteHead) {
+			git(fixture, ["--git-dir", remotePath, "symbolic-ref", "HEAD", "refs/heads/ghjig-absent-branch"]);
+		}
+	}
 	return fixture;
+}
+
+/** Run one fixture-scoped git command that must succeed (setup substrate). */
+export function fixtureGit(fixture: GithookFixture, args: string[]): void {
+	git(fixture, args);
+}
+
+/**
+ * Advance the fixture branch by one commit WITHOUT measuring the hook chain
+ * (`--no-verify`): a push arm needs the local branch ahead of the remote —
+ * an up-to-date push never fires pre-push at all — and how that commit came
+ * to exist is substrate, not the arm's subject.
+ */
+export function seedLocalCommit(fixture: GithookFixture): void {
+	fixture.seq += 1;
+	appendFileSync(join(fixture.root, "work.txt"), `seed ${fixture.seq}\n`);
+	git(fixture, ["add", "work.txt"]);
+	git(fixture, ["commit", "--no-verify", "-q", "-m", "chore: advance the fixture branch"]);
 }
 
 export function removeGithookFixture(fixture: GithookFixture): void {
@@ -229,6 +316,53 @@ export function commitWithMessage(
 
 	const auditBefore = existsSync(fixture.auditFile) ? readFileSync(fixture.auditFile, "utf8") : "";
 	const result = spawnSync("git", ["commit", ...(options.gitArgs ?? []), "-F", messageFile], {
+		cwd: fixture.root,
+		env: { ...baseEnv(fixture), ...(options.env ?? {}) },
+	});
+	const auditAfter = existsSync(fixture.auditFile) ? readFileSync(fixture.auditFile, "utf8") : "";
+
+	const stderrBytes = result.stderr ?? Buffer.alloc(0);
+	const stderr = stderrBytes.toString("utf8");
+	return {
+		status: result.status,
+		stdout: (result.stdout ?? Buffer.alloc(0)).toString("utf8"),
+		stderr,
+		stderrBytes,
+		auditDelta: auditAfter.slice(auditBefore.length),
+		cause: stderr
+			.split("\n")
+			.filter((line) => line !== "" && !line.startsWith("[dev-shell]"))
+			.join("\n"),
+	};
+}
+
+export interface PushOptions {
+	/** Per-push environment overrides, merged over the constructed base. */
+	env?: Record<string, string>;
+	/** Extra `git push` arguments, inserted before the remote name (e.g. `--force`). */
+	gitArgs?: string[];
+}
+
+/**
+ * Attempt `git push [gitArgs] origin <refspecs…>` through the fixture's
+ * hook chain — the push counterpart of `commitWithMessage`, returning the
+ * same observable shape. Two facts a caller must hold:
+ *
+ *   - pre-push fires only when at least one refspec is NOT up to date;
+ *     an arm that re-pushes the default branch advances it first
+ *     (`seedLocalCommit`);
+ *   - on a refused push, git's own stderr adds only its generic
+ *     failed-to-push line naming the remote PATH — the refspec's names are
+ *     never echoed by git itself, so byte-level "this refname reached no
+ *     surface" assertions measure the hook chain's emissions alone.
+ */
+export function pushRefs(
+	fixture: GithookFixture,
+	refspecs: string[],
+	options: PushOptions = {},
+): CommitAttempt {
+	const auditBefore = existsSync(fixture.auditFile) ? readFileSync(fixture.auditFile, "utf8") : "";
+	const result = spawnSync("git", ["push", ...(options.gitArgs ?? []), "origin", ...refspecs], {
 		cwd: fixture.root,
 		env: { ...baseEnv(fixture), ...(options.env ?? {}) },
 	});
