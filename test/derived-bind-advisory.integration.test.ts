@@ -34,12 +34,14 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import {
 	BIND_ADVISORY_ENTRY_TYPE,
 	BIND_REARM_COMMAND,
+	computeBindState,
 } from "../.pi/extensions/ghjig/bind-state.ts";
 import {
 	buildFixture,
@@ -210,5 +212,112 @@ describe("an unresolvable helper set is not a session-start state (issue #68 AC5
 				`enforcement surface, on each folded arm — and a session-start line for it describes a state ` +
 				`the session cannot act on differently from a bound one (§5.2)\n${diagnostics(helpersGoneRun)}`,
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Classifier/consumer config-resolution agreement (§4.6): the classifier's
+// child resolves the same configuration the consumer's git resolves, driven
+// directly against computeBindState with the consumer's environment set on
+// this process. Each arm derives the consumer's answer with the consumer's
+// own command under the identical environment, so the proposition measured
+// is agreement, never a hardcoded expectation.
+// ---------------------------------------------------------------------------
+
+describe("the classifier resolves the configuration the consumer's git resolves (issue #68 AC5, SPEC §4.6)", { skip: IS_WINDOWS }, () => {
+	/** Set env members for one call, restoring the prior state whatever happens. */
+	function withEnv(overrides: Record<string, string | undefined>, run: () => void): void {
+		const saved = new Map<string, string | undefined>();
+		for (const [key, value] of Object.entries(overrides)) {
+			saved.set(key, process.env[key]);
+			if (value === undefined) {
+				delete process.env[key];
+			} else {
+				process.env[key] = value;
+			}
+		}
+		try {
+			run();
+		} finally {
+			for (const [key, value] of saved.entries()) {
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+		}
+	}
+
+	/** A scratch repository carrying the committed .githooks, no local hooksPath. */
+	function scratchRepo(home: string): string {
+		const root = mkdtempSync(join(tmpdir(), "ghjig-xdg-repo-"));
+		runGit(root, home, ["-c", "init.defaultBranch=zqxdgmain", "init", "-q"]);
+		cpSync(join(repoRoot(), ".githooks"), join(root, ".githooks"), { recursive: true });
+		return root;
+	}
+
+	/** The consumer's own resolution of core.hooksPath under this process env. */
+	function consumerResolves(root: string): string {
+		const result = spawnSync("git", ["config", "--get", "core.hooksPath"], {
+			cwd: root,
+			env: { ...process.env },
+			timeout: 30_000,
+		});
+		return result.status === 0 ? result.stdout.toString("utf8").trim() : "";
+	}
+
+	it("a global binding the consumer's git does not read is not read by the classifier either", () => {
+		const home = mkdtempSync(join(tmpdir(), "ghjig-xdg-home-"));
+		const xdgElsewhere = mkdtempSync(join(tmpdir(), "ghjig-xdg-empty-"));
+		const root = scratchRepo(home);
+		try {
+			mkdirSync(join(home, ".config", "git"), { recursive: true });
+			writeFileSync(join(home, ".config", "git", "config"), `[core]\n\thooksPath = ${join(root, ".githooks")}\n`);
+			withEnv({ HOME: home, XDG_CONFIG_HOME: xdgElsewhere, GIT_CONFIG_NOSYSTEM: "1" }, () => {
+				assert.equal(
+					consumerResolves(root),
+					"",
+					"substrate: the consumer's git read $HOME/.config despite XDG_CONFIG_HOME pointing elsewhere",
+				);
+				assert.equal(
+					computeBindState(root),
+					"unbound",
+					"a classifier that resolves a binding the consumer's git does not read reports bound on a " +
+						"clone whose committed hooks do not fire — the silent degraded state §5.2 forbids",
+				);
+			});
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+			rmSync(home, { recursive: true, force: true });
+			rmSync(xdgElsewhere, { recursive: true, force: true });
+		}
+	});
+
+	it("a binding homed under XDG_CONFIG_HOME classifies bound, not degraded", () => {
+		const home = mkdtempSync(join(tmpdir(), "ghjig-xdg-home2-"));
+		const xdg = mkdtempSync(join(tmpdir(), "ghjig-xdg-cfg-"));
+		const root = scratchRepo(home);
+		try {
+			mkdirSync(join(xdg, "git"), { recursive: true });
+			writeFileSync(join(xdg, "git", "config"), `[core]\n\thooksPath = ${join(root, ".githooks")}\n`);
+			withEnv({ HOME: home, XDG_CONFIG_HOME: xdg, GIT_CONFIG_NOSYSTEM: "1" }, () => {
+				assert.notEqual(
+					consumerResolves(root),
+					"",
+					"substrate: the consumer's git did not resolve the XDG-homed binding",
+				);
+				assert.equal(
+					computeBindState(root),
+					"bound",
+					"a clone whose consumer-resolved hooks path is the committed adapters earns no advisory — " +
+						"an advisory here nags a clone whose tier fires (§5.2)",
+				);
+			});
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+			rmSync(home, { recursive: true, force: true });
+			rmSync(xdg, { recursive: true, force: true });
+		}
 	});
 });

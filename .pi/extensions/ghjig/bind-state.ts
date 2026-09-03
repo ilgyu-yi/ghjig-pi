@@ -185,15 +185,28 @@ function recordStampRefusal(stateRoot: string, cause: string, recovery: string):
 	});
 }
 
-/** Constructed child environment (#39): never the inherited env wholesale. */
+/**
+ * Constructed child environment (#39): never the inherited env wholesale.
+ * The two config-resolution members the consumer's own git reads —
+ * XDG_CONFIG_HOME and GIT_CONFIG_NOSYSTEM — pass through when set, so the
+ * classifier resolves the same configuration the consumer resolves; the
+ * GIT_CONFIG_* override family stays out.
+ */
 function childEnv(): Record<string, string> {
-	return {
+	const env: Record<string, string> = {
 		PATH: process.env.PATH ?? "",
 		HOME: process.env.HOME ?? "",
 		GIT_TERMINAL_PROMPT: "0",
 		GIT_NO_REPLACE_OBJECTS: "1",
 		LC_ALL: "C",
 	};
+	if (process.env.XDG_CONFIG_HOME !== undefined) {
+		env.XDG_CONFIG_HOME = process.env.XDG_CONFIG_HOME;
+	}
+	if (process.env.GIT_CONFIG_NOSYSTEM !== undefined) {
+		env.GIT_CONFIG_NOSYSTEM = process.env.GIT_CONFIG_NOSYSTEM;
+	}
+	return env;
 }
 
 /**
@@ -274,7 +287,7 @@ function stampIsFresh(stampPath: string): boolean {
 
 /**
  * The session_start entry point: debounced by the TTL stamp, silent on
- * bound/foreign-bound, one advisory entry per degraded state naming the
+ * bound, one advisory entry per degraded state naming the
  * state token and the exact re-arm command. Never throws, never blocks
  * beyond the child timeout bound.
  */

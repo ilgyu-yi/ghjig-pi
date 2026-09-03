@@ -11,7 +11,7 @@
 . "$(dirname "${BASH_SOURCE[0]}")/_lib.sh"
 
 githook_source branch_guard.sh branch || exit 0
-githook_require is_protected_branch
+githook_require is_protected_branch branch
 
 _gh_blocked=0
 # shellcheck disable=SC2034  # _gh_loid/_gh_roid are positional fillers, unused.

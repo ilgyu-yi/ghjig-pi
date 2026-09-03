@@ -1423,15 +1423,16 @@ describe("fail-posture inventory (§3.9)", () => {
 		// The closure check on the two arms above: they enumerate shapes, and
 		// that enumeration is only as live as the file it was derived from. What
 		// this pins is the count of lines in .githooks/_lib.sh that fold the hook
-		// to `exit 0` — today the prelude's 4 derivation guards, githook_source's
+		// to `exit 0` — today the prelude's 3 derivation guards (the two
+		// unresolvable-location arms and the containment arm), githook_source's
 		// trap, and githook_require's fold. A control point added anywhere in the
 		// file, in any spelling, moves the count, and the author re-derives the
 		// census instead of inheriting a stale one.
 		const points = libFailOpenPoints();
 		assert.equal(
 			points.length,
-			6,
-			`.githooks/_lib.sh no longer carries the 6 fail-open control points the inventory's rows were ` +
+			5,
+			`.githooks/_lib.sh no longer carries the 5 fail-open control points the inventory's rows were ` +
 				`derived from — re-derive the census and give every distinct failure shape a row (§3.9): ` +
 				`${JSON.stringify(points, null, 2)}`,
 		);

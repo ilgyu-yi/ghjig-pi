@@ -80,7 +80,7 @@ export const POSTURES: readonly PostureRow[] = [
 			"conventional_commit.sh present but its source does not complete — it exits while being sourced, fails to parse, or returns a non-zero status (githook_source's EXIT-trap fold and safe_source's non-zero-return record in .githooks/_lib.sh)",
 		posture: "open",
 		justification:
-			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; `exit` inside a sourced helper terminates the hook shell itself and would carry its status out to git, so the fold turns every shape of it into an allow for this arm and every arm after it (§3.2's arm ordering). The fold is not silent: one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). Residual (§3.11): two ways out of a source reach neither the fold's trap nor safe_source's return check and so fail CLOSED rather than landing on this row — `exec` replaces the process image (measured: `exec false` appended to a sourced helper — rc 1, no tier bytes on either stream), and a signal kills the shell (bash re-raises it once the trap has run, so git reports the death).",
+			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; `exit` inside a sourced helper terminates the hook shell itself and would carry its status out to git, so the fold turns every shape of it into an allow for this arm and every arm after it (§3.2's arm ordering). The fold is not silent: one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). Residual (§3.11): three ways out of a source escape the fold and do not land on this row — `exec` replaces the process image (measured: `exec false` appended to a sourced helper — rc 1, no tier bytes on either stream), a signal kills the shell (bash re-raises it once the trap has run, so git reports the death), and a sourced file that installs its own EXIT trap replaces the tier's — bash holds one EXIT slot — so the fold's line and record never run (measured: an installed EXIT handler plus `exit 5` appended to a sourced helper — rc 1, no tier bytes, no record).",
 	},
 	{
 		dependency: "commit-format-measurement",
@@ -112,7 +112,7 @@ export const POSTURES: readonly PostureRow[] = [
 			"branch_guard.sh present but its source does not complete — it exits while being sourced, fails to parse, or returns a non-zero status (githook_source's EXIT-trap fold and safe_source's non-zero-return record in .githooks/_lib.sh)",
 		posture: "open",
 		justification:
-			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; the fold turns every shape of it into an allow for this arm and every arm after it (§3.2's arm ordering), with one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). The residual on the commit-format-helper source row — `exec` and signal termination — holds here too.",
+			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; the fold turns every shape of it into an allow for this arm and every arm after it (§3.2's arm ordering), with one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). The residual on the commit-format-helper source row — `exec`, signal termination, and trap replacement — holds here too.",
 	},
 	{
 		dependency: "branch-guard-derivation",
@@ -160,7 +160,7 @@ export const POSTURES: readonly PostureRow[] = [
 			"secret_scan.sh present but its source does not complete — it exits while being sourced, fails to parse, or returns a non-zero status (githook_source's EXIT-trap fold and safe_source's non-zero-return record in .githooks/_lib.sh)",
 		posture: "open",
 		justification:
-			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; the fold turns every shape of it into an allow for this arm and every arm after it (§3.2's arm ordering), with one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). The residual on the commit-format-helper source row — `exec` and signal termination — holds here too.",
+			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; the fold turns every shape of it into an allow for this arm and every arm after it (§3.2's arm ordering), with one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). The residual on the commit-format-helper source row — `exec`, signal termination, and trap replacement — holds here too.",
 	},
 	{
 		dependency: "secret-scan-patterns",

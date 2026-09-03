@@ -39,11 +39,18 @@ set -uo pipefail
 # sink, from the repository top. Both are resolved PHYSICALLY (cd + pwd -P)
 # so the containment test below compares real paths, never spellings.
 _gh_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || _gh_here=""
-[ -n "$_gh_here" ] || exit 0
+if [ -z "$_gh_here" ]; then
+  printf '[dev-shell] local hook tier not enforced: the hooks could not resolve their own installed location, so this hook ran no check and wrote no record\n' >&2
+  exit 0
+fi
 _gh_top="$(git rev-parse --show-toplevel </dev/null 2>/dev/null)" || _gh_top=""
-[ -n "$_gh_top" ] || exit 0
-_gh_top="$(cd "$_gh_top" 2>/dev/null && pwd -P)" || _gh_top=""
-[ -n "$_gh_top" ] || exit 0
+if [ -n "$_gh_top" ]; then
+  _gh_top="$(cd "$_gh_top" 2>/dev/null && pwd -P)" || _gh_top=""
+fi
+if [ -z "$_gh_top" ]; then
+  printf '[dev-shell] local hook tier not enforced: the hooks could not resolve the repository top this operation runs against, so this hook ran no check and wrote no record\n' >&2
+  exit 0
+fi
 # The pattern's variable is quoted, so a repository path carrying glob bytes
 # is matched literally.
 case "$_gh_here/" in
@@ -95,9 +102,12 @@ GHJIG_AUDIT_SINK="$_gh_top/.ghjig/state/audit.jsonl"
 # and any group or other mode bit. This writer appends to all three. That
 # is this writer's enumerated residual (§3.11), stated here rather than
 # closed: a shell `[ ]` probe cannot ask them of the descriptor it is about
-# to write, and asking them of the PATH is a different question. The TS
-# side's own residual at the components above the namespace is stated in
-# that file's header (§5.5).
+# to write, and asking them of the PATH is a different question. The link
+# checks themselves are probe-then-append — the shell has no O_NOFOLLOW
+# open, so between `[ -L ]` and `>>` a link can be swapped in at a checked
+# component; the TS sibling's guarded open closes that window on its side.
+# The TS side's own residual at the components above the namespace is
+# stated in that file's header (§5.5).
 audit_log() {
   (
     umask 177
@@ -167,9 +177,10 @@ safe_source() {
 # inner call that cleared the trap on its way out would leave the outer
 # source unguarded, and an `exit` there would carry its status to git — a
 # wedged hook with nothing printed. The trap is armed when the outermost
-# window opens and cleared only when it closes, so the trap in force during
-# a source is always this file's own and one the sourced file installs does
-# not survive the source.
+# window opens, and whatever trap is then in force is cleared when it
+# closes; in between, a sourced file that installs its own EXIT trap
+# replaces it — bash holds one EXIT slot — and the fold's line and record
+# then do not run.
 _GH_SRC_DEPTH=0
 githook_source() {
   local _gh_src_rc
