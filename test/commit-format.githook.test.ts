@@ -337,4 +337,34 @@ describe("chain degradation stays fail-open (issue #55 AC9)", { skip: IS_WINDOWS
 			removeGithookFixture(fixture);
 		}
 	});
+
+	it("the check_commit_subject require miss records under this arm's own category", () => {
+		// A degradation record is read by category: one landing under the
+		// tier default is indistinguishable from a record about the tier
+		// itself, so the arm that folded cannot be told from the sink.
+		const fixture = buildGithookFixture();
+		removeDelegatedHelpers(fixture);
+		try {
+			writeFileSync(
+				join(fixture.helpersDir, "conventional_commit.sh"),
+				"# stub helper: sources cleanly, defines everything except the delegated function\nunrelated_helper_function() { :; }\n",
+			);
+			const attempt = commitWithMessage(fixture, GRAMMAR_VIOLATION);
+			const miss = attempt.auditDelta
+				.split("\n")
+				.filter((line) => /\brequire-missing check_commit_subject\b/.test(line));
+			assert.equal(
+				miss.length,
+				1,
+				`expected exactly one require-miss record naming check_commit_subject; delta: ${JSON.stringify(attempt.auditDelta)}`,
+			);
+			assert.match(
+				miss[0],
+				/"category":"commit-format"/,
+				`the require miss records under a category that does not name this arm; record: ${miss[0]}`,
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
 });

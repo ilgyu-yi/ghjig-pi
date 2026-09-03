@@ -65,8 +65,17 @@ GHJIG_AUDIT_SINK="$_gh_top/.ghjig/state/audit.jsonl"
 
 # audit_log <action> <category> [text...] — append ONE sanitized JSON
 # record to the sink: control bytes stripped, backslash and double-quote
-# escaped, one printf to an O_APPEND redirect, so concurrent writers
-# interleave whole records and never fragments of one. The umask covers the
+# escaped, one printf to an O_APPEND redirect. Composition holds
+# unconditionally — one record is one line, and no field's content can
+# close its field and open another. Delivery does not: the shell's printf
+# writes through a stdio buffer, so a record larger than that buffer
+# reaches the sink as several appends, and a second shell writer appending
+# concurrently can land between them. Residual (§3.11), measured at three
+# concurrent writers of 200 records each: at 200, 700 and 900 bytes of text
+# every one of the 600 lines parses; at 2000 and 8000 bytes some do not.
+# The damage is trail integrity, never forgery — the escaping above holds
+# whatever the interleaving does, so a fragment cannot become a record that
+# reads as another's. The umask covers the
 # 0600 file create only (umask 177, which is the value that yields mode
 # 0600); a missing sink directory is created under umask 077 (nested
 # subshell) — a dir created without its search bit would silently lose every
@@ -94,20 +103,24 @@ GHJIG_AUDIT_SINK="$_gh_top/.ghjig/state/audit.jsonl"
 # This function is not the sink's only writer, and the refusals above bind
 # THIS one. The extension runtime appends to the same file through
 # `appendAuditRecord` (.pi/extensions/ghjig/audit.ts), which opens with
-# O_NOFOLLOW|O_NONBLOCK and holds the descriptor to an fstat verdict. The
-# relation between the two writers is CONTAINMENT, not equivalence: they
-# agree on the link and FIFO dimensions this function checks, and the TS
-# verdict refuses three more that this one does not measure at all — a sink
-# whose inode carries more than one name, a sink owned by another account,
-# and any group or other mode bit. This writer appends to all three. That
-# is this writer's enumerated residual (§3.11), stated here rather than
-# closed: a shell `[ ]` probe cannot ask them of the descriptor it is about
-# to write, and asking them of the PATH is a different question. The link
-# checks themselves are probe-then-append — the shell has no O_NOFOLLOW
-# open, so between `[ -L ]` and `>>` a link can be swapped in at a checked
-# component; the TS sibling's guarded open closes that window on its side.
-# The TS side's own residual at the components above the namespace is
-# stated in that file's header (§5.5).
+# O_NOFOLLOW|O_NONBLOCK and holds the descriptor to an fstat verdict.
+# Neither writer contains the other, and what each covers divides. On the
+# LINK dimension this one refuses all three components of the sink path
+# named above, while the TS open's O_NOFOLLOW binds the final component
+# alone: a link at the container or at the state directory is followed there
+# (measured: `appendAuditRecord` writes through a link at either component
+# to a destination outside the repository and returns success, where this
+# function drops the record). On three dimensions the TS verdict refuses
+# what this one does not measure at all — a sink whose inode carries more
+# than one name, a sink owned by another account, and any group or other
+# mode bit. This writer appends to all three. That is this writer's
+# enumerated residual (§3.11), stated here rather than closed: a shell `[ ]`
+# probe cannot ask them of the descriptor it is about to write, and asking
+# them of the PATH is a different question. The link checks themselves are
+# probe-then-append — the shell has no O_NOFOLLOW open, so between `[ -L ]`
+# and `>>` a link can be swapped in at a checked component; the TS sibling's
+# guarded open closes that window at the one component it guards. The TS
+# side states its own ancestor residual in that file's header (§5.5).
 audit_log() {
   (
     umask 177
@@ -176,11 +189,16 @@ safe_source() {
 # The window is COUNTED, because a helper may itself call githook_source: an
 # inner call that cleared the trap on its way out would leave the outer
 # source unguarded, and an `exit` there would carry its status to git — a
-# wedged hook with nothing printed. The trap is armed when the outermost
-# window opens, and whatever trap is then in force is cleared when it
-# closes; in between, a sourced file that installs its own EXIT trap
-# replaces it — bash holds one EXIT slot — and the fold's line and record
-# then do not run.
+# wedged hook with nothing printed.
+#
+# What the fold COVERS is a committed helper's own error path that ends in
+# `exit` or in a non-zero return, with this tier's EXIT slot and the depth
+# counter below untouched and the shell still alive. Those are the terms it
+# runs on, not exceptions to a wider claim: a sourced file executes in THIS
+# shell, so it can reach any of them. Bash holds one EXIT slot, so a handler
+# a sourced file installs replaces the tier's, and the outcome is then
+# whatever that handler decides — allow or refuse — with the fold's line and
+# record not run.
 _GH_SRC_DEPTH=0
 githook_source() {
   local _gh_src_rc

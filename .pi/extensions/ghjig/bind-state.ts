@@ -187,10 +187,19 @@ function recordStampRefusal(stateRoot: string, cause: string, recovery: string):
 
 /**
  * Constructed child environment (#39): never the inherited env wholesale.
- * The two config-resolution members the consumer's own git reads —
- * XDG_CONFIG_HOME and GIT_CONFIG_NOSYSTEM — pass through when set, so the
- * classifier resolves the same configuration the consumer resolves; the
- * GIT_CONFIG_* override family stays out.
+ * XDG_CONFIG_HOME and GIT_CONFIG_NOSYSTEM pass through when set, so the
+ * classifier reads the same config FILES the consumer reads through those
+ * two and through nothing else. Anything else in the session env that
+ * changes git's configuration — the GIT_CONFIG_* override family, which
+ * sets any key from the environment and so is the arbitrary-configuration
+ * surface #39's constructed env exists to keep out — is outside that bound,
+ * and can therefore diverge this child's answer from the consumer's in
+ * either direction, including a silent `bound` on a clone whose committed
+ * hooks do not fire (one measured instance: with GIT_CONFIG_COUNT=1,
+ * GIT_CONFIG_KEY_0=core.hooksPath and GIT_CONFIG_VALUE_0=/nonexistent-hooks
+ * in the session env of a LOCALLY bound clone, the consumer's git resolves
+ * /nonexistent-hooks and commits under no hook, while this child resolves
+ * .githooks).
  */
 function childEnv(): Record<string, string> {
 	const env: Record<string, string> = {
