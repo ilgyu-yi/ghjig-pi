@@ -234,9 +234,9 @@ export function buildGithookFixture(options: GithookFixtureOptions = {}): Githoo
  * Remove every delegated helper FILE from this fixture's derived helper
  * directory — the "absent helper" degradation, staged where the tier
  * actually looks (§4.1). A helper's committed DATA stays: the
- * secret-pattern file is resolved repo-root-relative by whichever helper
- * reads it (§3.3), so an arm that restores one real helper measures an
- * armed one. The directory itself is left in place, so an arm that then
+ * secret-pattern file is resolved from the installed position of whichever
+ * helper reads it (§3.3) — this directory — so an arm that restores one
+ * real helper measures an armed one. The directory itself is left in place, so an arm that then
  * writes one stub file measures exactly one present helper.
  */
 export function removeDelegatedHelpers(fixture: GithookFixture): void {

@@ -9,14 +9,15 @@
 #   safe_source / audit_log               — the two runtime primitives.
 #
 # This file DERIVES the two locations the tier needs (§3.2, §4.1, §4.2,
-# §4.6): the helper directory from its own installed position, and the
-# record sink from the repository top the hook is running against. Both
+# §4.6) from ONE source the invoking environment cannot move — this file's
+# own installed position: the helper directory beside it, and the record
+# sink at the top of the repository these adapters are committed in. Both
 # sides of the sink therefore perform one derivation rather than agreeing on
 # two supplied values (§4.6). The derivation is bounded by a refusal: where
-# the resolved helper location does not lie under that repository top, the
-# tier runs no check and says so on stderr, because a tier that resolved its
-# checks outside the repository it was invoked in would write its records
-# there too, across the boundary §5.5 draws.
+# that repository is not the one this operation runs against, the tier runs
+# no check and says so on stderr, because a tier whose checks are committed
+# in another repository would write its records there too, across the
+# boundary §5.5 draws.
 #
 # The delegated interface the adapters require of the helper directory:
 #   branch_guard.sh        → current_branch, is_protected_branch
@@ -35,31 +36,55 @@
 # would silently starve it.
 set -uo pipefail
 
-# The helper directory, from this file's own installed position; the record
-# sink, from the repository top. Both are resolved PHYSICALLY (cd + pwd -P)
-# so the containment test below compares real paths, never spellings.
+# Two tops, both resolved PHYSICALLY (cd + pwd -P) so the comparison below
+# reads real paths and never spellings.
+#
+# `_gh_op_top` is the repository the OPERATION runs against: git's own
+# answer from the environment and cwd it handed this hook.
+#
+# `_gh_top` is the repository these ADAPTERS are committed in, discovered
+# from `_gh_here` — the position this file was sourced from. It is the sink's
+# source because the operation's top is the caller's to name and the
+# adapters' position is not: git runs a hook with cwd at the work tree it was
+# told to use, so `GIT_WORK_TREE=<ancestor>` on a `git commit` moves the
+# operation's top to a directory the caller chose, and a sink derived from it
+# lands outside the repository §5.5 bounds the shell to.
+#
+# The scrub is three variables measured to move THIS child's answer, each on
+# its own: `GIT_DIR` makes it answer the `-C` directory itself, `GIT_WORK_TREE`
+# makes it answer the directory the caller named, and `GIT_CEILING_DIRECTORIES`
+# makes it fail outright. `GIT_DISCOVERY_ACROSS_FILESYSTEM` joins them as git's
+# own documented control on how far discovery walks; it is not measured here,
+# since the shape needs a mount boundary. The config-injection family is
+# deliberately NOT on the list: with `GIT_DIR` unset, `core.worktree` set from
+# the environment was measured not to move this answer, so unsetting it would
+# be an unset with no shape behind it. `GIT_DIR` is scrubbed HERE and nowhere
+# else — discovery upward from `_gh_here` is what replaces it, and every other
+# git child of this hook keeps the one git supplied.
 _gh_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || _gh_here=""
 if [ -z "$_gh_here" ]; then
   printf '[dev-shell] local hook tier not enforced: the hooks could not resolve their own installed location, so this hook ran no check and wrote no record\n' >&2
   exit 0
 fi
-_gh_top="$(git rev-parse --show-toplevel </dev/null 2>/dev/null)" || _gh_top=""
-if [ -n "$_gh_top" ]; then
-  _gh_top="$(cd "$_gh_top" 2>/dev/null && pwd -P)" || _gh_top=""
+_gh_op_top="$(git rev-parse --show-toplevel </dev/null 2>/dev/null)" || _gh_op_top=""
+if [ -n "$_gh_op_top" ]; then
+  _gh_op_top="$(cd "$_gh_op_top" 2>/dev/null && pwd -P)" || _gh_op_top=""
 fi
-if [ -z "$_gh_top" ]; then
+if [ -z "$_gh_op_top" ]; then
   printf '[dev-shell] local hook tier not enforced: the hooks could not resolve the repository top this operation runs against, so this hook ran no check and wrote no record\n' >&2
   exit 0
 fi
-# The pattern's variable is quoted, so a repository path carrying glob bytes
-# is matched literally.
-case "$_gh_here/" in
-  "$_gh_top"/*) ;;
-  *)
-    printf '[dev-shell] local hook tier not enforced: the hooks resolve their helpers outside the repository this operation runs against, so this hook ran no check and wrote no record\n' >&2
-    exit 0
-    ;;
-esac
+_gh_top="$(
+  unset GIT_DIR GIT_WORK_TREE GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM
+  git -C "$_gh_here" rev-parse --show-toplevel </dev/null 2>/dev/null
+)" || _gh_top=""
+if [ -n "$_gh_top" ]; then
+  _gh_top="$(cd "$_gh_top" 2>/dev/null && pwd -P)" || _gh_top=""
+fi
+if [ -z "$_gh_top" ] || [ "$_gh_top" != "$_gh_op_top" ]; then
+  printf '[dev-shell] local hook tier not enforced: these hooks are not committed in the repository this operation runs against, so this hook ran no check and wrote no record\n' >&2
+  exit 0
+fi
 GHJIG_SHELL_HELPERS="$_gh_here/helpers"
 GHJIG_AUDIT_SINK="$_gh_top/.ghjig/state/audit.jsonl"
 
@@ -70,12 +95,17 @@ GHJIG_AUDIT_SINK="$_gh_top/.ghjig/state/audit.jsonl"
 # close its field and open another. Delivery does not: the shell's printf
 # writes through a stdio buffer, so a record larger than that buffer
 # reaches the sink as several appends, and a second shell writer appending
-# concurrently can land between them. Residual (§3.11), measured at three
-# concurrent writers of 200 records each: at 200, 700 and 900 bytes of text
-# every one of the 600 lines parses; at 2000 and 8000 bytes some do not.
-# The damage is trail integrity, never forgery — the escaping above holds
-# whatever the interleaving does, so a fragment cannot become a record that
-# reads as another's. The umask covers the
+# concurrently can land between them. Residual (§3.11), measured on darwin
+# 25.6.0 / GNU bash 3.2.57 (arm64) at three concurrent writers of 200
+# records each: at 200, 700 and 900 bytes of text every one of the 600 lines
+# parses; at 1000, 2000 and 8000 some do not. The edge tracks THAT host's
+# stdio buffer, so the figures are the host's and the rule above them is
+# not. The FIELD boundary holds whatever the interleaving does: the escaping
+# above keeps a fragment from opening a field it does not own — 0 crossings
+# in the 3474 records that parsed across that sweep. Provenance does not — a
+# torn fragment can itself parse, carrying another writer's text under this
+# one's category — so a consumer of this trail cannot read parseability as
+# provenance. The umask covers the
 # 0600 file create only (umask 177, which is the value that yields mode
 # 0600); a missing sink directory is created under umask 077 (nested
 # subshell) — a dir created without its search bit would silently lose every
@@ -195,10 +225,8 @@ safe_source() {
 # `exit` or in a non-zero return, with this tier's EXIT slot and the depth
 # counter below untouched and the shell still alive. Those are the terms it
 # runs on, not exceptions to a wider claim: a sourced file executes in THIS
-# shell, so it can reach any of them. Bash holds one EXIT slot, so a handler
-# a sourced file installs replaces the tier's, and the outcome is then
-# whatever that handler decides — allow or refuse — with the fold's line and
-# record not run.
+# shell, so it can reach any of them. Outside those terms the outcome is not
+# this tier's to decide, and the fold's line and record may not run.
 _GH_SRC_DEPTH=0
 githook_source() {
   local _gh_src_rc

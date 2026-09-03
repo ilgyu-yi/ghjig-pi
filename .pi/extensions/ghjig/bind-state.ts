@@ -85,8 +85,9 @@ import {
 	openSync,
 	readFileSync,
 	realpathSync,
+	statSync,
 } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	appendAuditRecord,
@@ -187,19 +188,24 @@ function recordStampRefusal(stateRoot: string, cause: string, recovery: string):
 
 /**
  * Constructed child environment (#39): never the inherited env wholesale.
- * XDG_CONFIG_HOME and GIT_CONFIG_NOSYSTEM pass through when set, so the
- * classifier reads the same config FILES the consumer reads through those
- * two and through nothing else. Anything else in the session env that
- * changes git's configuration — the GIT_CONFIG_* override family, which
- * sets any key from the environment and so is the arbitrary-configuration
- * surface #39's constructed env exists to keep out — is outside that bound,
- * and can therefore diverge this child's answer from the consumer's in
- * either direction, including a silent `bound` on a clone whose committed
- * hooks do not fire (one measured instance: with GIT_CONFIG_COUNT=1,
+ * This child's environment is exactly the literal below — PATH, HOME,
+ * GIT_TERMINAL_PROMPT, GIT_NO_REPLACE_OBJECTS, LC_ALL — plus
+ * XDG_CONFIG_HOME and GIT_CONFIG_NOSYSTEM when the session sets them. HOME
+ * and XDG_CONFIG_HOME are the two that make the classifier read the same
+ * config FILES the consumer reads, which is why they are on it.
+ *
+ * That set is the whole of what this child gets, so anything else the
+ * session carries is live for the consumer's git and absent for this one,
+ * and the two answers can diverge in either direction — over configuration
+ * and over repository identity alike. One measured instance of each, on a
+ * locally bound clone: with GIT_CONFIG_COUNT=1,
  * GIT_CONFIG_KEY_0=core.hooksPath and GIT_CONFIG_VALUE_0=/nonexistent-hooks
- * in the session env of a LOCALLY bound clone, the consumer's git resolves
- * /nonexistent-hooks and commits under no hook, while this child resolves
- * .githooks).
+ * in the session env, the consumer's git resolves /nonexistent-hooks and
+ * commits under no hook while this child resolves .githooks; with GIT_DIR
+ * and GIT_WORK_TREE naming an unbound sibling clone, the consumer's git
+ * resolves an empty hooksPath and a toplevel at the sibling while this
+ * child answers about the clone the session stands in. Both read `bound`,
+ * the silent state.
  */
 function childEnv(): Record<string, string> {
 	const env: Record<string, string> = {
@@ -256,7 +262,17 @@ function gitAnswer(cwd: string, args: string[], absentStatus?: number): string |
  * `bound` and a path-prefix collision cannot mis-answer in either
  * direction (§4.6). An unresolvable side is not this repository's
  * committed adapters, which is exactly what `foreign-bound` says.
+ *
+ * `bound` is the SILENT state, so it is only reached where the adapters
+ * would actually run: the resolved directory must lie under the resolved
+ * top — both sides are realpath-ed before the compare, never the caller's
+ * own cwd, which the caller supplies unresolved — and the three adapters
+ * git executes must be present in it. Presence is read from the filesystem;
+ * this classifier runs no program of the repository it classifies, so it
+ * asks whether the adapters are there and never whether they run.
  */
+const COMMITTED_ADAPTERS = ["pre-commit", "pre-push", "commit-msg"] as const;
+
 export function computeBindState(cwd: string): BindState | undefined {
 	const top = gitAnswer(cwd, ["rev-parse", "--show-toplevel"]);
 	if (top === undefined || top === "") {
@@ -270,9 +286,21 @@ export function computeBindState(cwd: string): BindState | undefined {
 		return "unbound";
 	}
 	try {
+		const physicalTop = realpathSync(top);
 		const want = realpathSync(join(top, ".githooks"));
 		const have = realpathSync(isAbsolute(configured) ? configured : join(top, configured));
-		return have === want ? "bound" : "foreign-bound";
+		if (have !== want) {
+			return "foreign-bound";
+		}
+		if (have !== physicalTop && !have.startsWith(physicalTop.endsWith(sep) ? physicalTop : physicalTop + sep)) {
+			return "foreign-bound";
+		}
+		for (const adapter of COMMITTED_ADAPTERS) {
+			if (!statSync(join(have, adapter)).isFile()) {
+				return "foreign-bound";
+			}
+		}
+		return "bound";
 	} catch {
 		return "foreign-bound";
 	}

@@ -4,11 +4,13 @@
 # adapters, never executed; defines:
 #   scan_staged_secrets
 #
-# Rule source: the committed pattern file `.githooks/helpers/secret-patterns`,
-# resolved REPO-ROOT-relative (`git rev-parse --show-toplevel`) — the bytes
-# both readers must agree on are the committed repo file (§3.3's
-# single-source rule). Format and the
-# compatible-extension-only rule live in that file's header.
+# Rule source: the committed pattern file `secret-patterns`, resolved from
+# THIS file's own installed position (`BASH_SOURCE[0]`, inside the function,
+# so the derivation stays function-local) — the bytes both readers must
+# agree on are the committed repo file (§3.3's single-source rule), and the
+# rule set travels with the helper set the adapters actually sourced rather
+# than with a directory name spelled against the repository top. Format and
+# the compatible-extension-only rule live in that file's header.
 #
 # Measurement domain (§3.3): the added text lines of the staged diff, per
 # staged path — paths from `git diff --cached --name-only -z`, each then
@@ -47,7 +49,11 @@
 # approval — literal or shell-glob lines, `#` comments, absent means empty;
 # a present-but-unreadable list emits one degradation warn record and the
 # scan proceeds with NO exclusions (it fails to excuse; it never approves
-# unmeasured).
+# unmeasured). Suppression by a line that MATCHES is silent on every
+# surface, including a `*` line that excludes every staged path: the
+# machinery degradations above print because nobody chose them, and this is
+# a committed file the repository chose — a record per suppressed path would
+# be one per commit per path on any repository with a broad list.
 #
 # This file emits the CAUSE only; each calling surface appends the recovery
 # live at that surface (§3.11's arm-scoped remediation). Every git child
@@ -89,8 +95,15 @@ _ghjig_ss_sanitize_path() {
 }
 
 # _ghjig_ss_disarm <reason-constant> — machinery degradation: exactly one
-# not-enforced warn record for the run, then the caller allows (§3.9).
+# not-enforced warn record AND one stderr line for the run, then the caller
+# allows (§3.9). The line is what every other machinery degradation in this
+# tier prints, and without it this arm's allow is byte-identical on both
+# streams to an enforced pass — the disarmed allow §3.9 forbids to read like
+# an enforced one. It stays one line for the run, not one per suppressed
+# path: the record already carries the reason, and the caller appends its
+# own recovery.
 _ghjig_ss_disarm() {
+	printf '%s\n' "[dev-shell] staged-secret scan not enforced: $1 - this commit was not scanned" >&2
 	if command -v audit_log >/dev/null 2>&1; then
 		( audit_log warn secret not-enforced "staged-secret scan not enforced: $1" ) </dev/null >/dev/null 2>&1 || true
 	fi
@@ -213,7 +226,7 @@ scan_staged_secrets() {
 	# LC_ALL=C for the run: [[ =~ ]] matches under byte semantics (§3.3's
 	# pinned matcher). Function-local, restored on return.
 	local LC_ALL=C
-	local _ss_top _ss_pf
+	local _ss_top _ss_pf _ss_home
 	_ss_top="$(git rev-parse --show-toplevel 2>/dev/null </dev/null)" || _ss_top=""
 	if [ -z "$_ss_top" ]; then
 		_ghjig_ss_disarm 'repository toplevel unresolvable'
@@ -223,7 +236,12 @@ scan_staged_secrets() {
 	# Up-front pattern validation — machinery for the WHOLE run (§3.10's
 	# valid-AND-non-empty rule): any invalid row disarms before any path
 	# is scanned; a valid neighbour row never turns a partial scan.
-	_ss_pf="$_ss_top/.githooks/helpers/secret-patterns"
+	_ss_home="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || _ss_home=""
+	if [ -z "$_ss_home" ]; then
+		_ghjig_ss_disarm "rule source unresolvable from the helper's own installed position"
+		return 0
+	fi
+	_ss_pf="$_ss_home/secret-patterns"
 	if [ ! -f "$_ss_pf" ] || [ ! -r "$_ss_pf" ]; then
 		_ghjig_ss_disarm 'pattern file absent or unreadable'
 		return 0

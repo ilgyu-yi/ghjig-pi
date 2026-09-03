@@ -34,7 +34,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -318,6 +318,92 @@ describe("the classifier resolves the configuration the consumer's git resolves 
 			rmSync(root, { recursive: true, force: true });
 			rmSync(home, { recursive: true, force: true });
 			rmSync(xdg, { recursive: true, force: true });
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// `bound` is the SILENT state, so the classifier reaches it only where the
+// adapters would actually run. Two shapes pass the resolved-path compare and
+// arm nothing: a hooks directory that resolves outside the repository, and
+// one carrying no adapters. Each arm derives its own positive control from
+// the same fixture before mutating it, so a degraded verdict below is the
+// mutation and never a dead substrate.
+// ---------------------------------------------------------------------------
+
+describe("the classifier does not report bound where the adapters would not run (issue #68 AC5, SPEC §5.2)", { skip: IS_WINDOWS }, () => {
+	/** A scratch repository carrying the committed .githooks, bound at its own scope. */
+	function boundRepo(): string {
+		const root = mkdtempSync(join(tmpdir(), "ghjig-armverdict-"));
+		const home = join(root, "home");
+		mkdirSync(home, { recursive: true });
+		runGit(root, home, ["-c", "init.defaultBranch=zqverdictmain", "init", "-q"]);
+		cpSync(join(repoRoot(), ".githooks"), join(root, ".githooks"), { recursive: true });
+		runGit(root, home, ["config", "core.hooksPath", ".githooks"]);
+		return root;
+	}
+
+	it("a bound clone whose adapters were removed is classified degraded", () => {
+		const root = boundRepo();
+		try {
+			assert.equal(
+				computeBindState(root),
+				"bound",
+				"substrate: the unmutated clone did not classify bound, so the mutation below measures nothing",
+			);
+			for (const adapter of ["pre-commit", "pre-push", "commit-msg"]) {
+				rmSync(join(root, ".githooks", adapter), { force: true });
+			}
+			assert.equal(
+				computeBindState(root),
+				"foreign-bound",
+				"emptied adapters: the classifier reported `bound` — the SILENT state — for a clone whose " +
+					"commits fire nothing, so session start says nothing and no surface reports the disarm (§5.2)",
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("a bound clone whose hooks directory escapes the repository is classified degraded", () => {
+		const root = boundRepo();
+		const outside = mkdtempSync(join(tmpdir(), "ghjig-armverdict-outside-"));
+		try {
+			assert.equal(
+				computeBindState(root),
+				"bound",
+				"substrate: the unmutated clone did not classify bound, so the mutation below measures nothing",
+			);
+			cpSync(join(root, ".githooks"), join(outside, "githooks"), { recursive: true });
+			rmSync(join(root, ".githooks"), { recursive: true, force: true });
+			symlinkSync(join(outside, "githooks"), join(root, ".githooks"));
+			assert.equal(
+				computeBindState(root),
+				"foreign-bound",
+				"escaping hooks link: the classifier reported `bound` for a chain the runtime refuses on every " +
+					"commit — the arming verdict and the runtime it predicts must not disagree (§5.2)",
+			);
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("a clone reached through a symlinked path is still classified bound", () => {
+		const root = boundRepo();
+		const link = `${root}-link`;
+		try {
+			symlinkSync(root, link);
+			assert.equal(
+				computeBindState(link),
+				"bound",
+				"symlinked checkout path: a containment test taken against the caller's own unresolved cwd " +
+					"answers `foreign-bound` on a clone that is bound — the refusal added for a fail-open " +
+					"shape would become a false advisory on a clone that was fine",
+			);
+		} finally {
+			rmSync(link, { force: true });
+			rmSync(root, { recursive: true, force: true });
 		}
 	});
 });

@@ -136,7 +136,7 @@ function stageFile(fixture: GithookFixture, name: string, content: string | Buff
 	fixtureGit(fixture, ["add", "--", name]);
 }
 
-/** The fixture's copy of the committed pattern-file path (repo-root-relative read, §3.3). */
+/** The fixture's copy of the committed pattern-file path (read from the helper's own position, §3.3). */
 function fixturePatternsPath(fixture: GithookFixture): string {
 	return join(fixture.root, ".githooks", "helpers", "secret-patterns");
 }

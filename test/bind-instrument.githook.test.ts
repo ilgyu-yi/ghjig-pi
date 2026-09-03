@@ -52,6 +52,7 @@ import {
 	readFileSync,
 	rmSync,
 	statSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -662,7 +663,7 @@ describe("the tier's record writer bounds its own writes (issue #68, SPEC §5.5)
 		}
 	});
 
-	it("concurrent bash and Node appends interleave by whole lines only (mixed-writer sink bound)", async () => {
+	it("concurrent bash and Node appends interleave by whole lines only, at a record size inside the single-append bound (mixed-writer sink bound)", async () => {
 		const fixture = buildGithookFixture({});
 		try {
 			const stateRoot = join(fixture.root, ".ghjig", "state");
@@ -711,7 +712,9 @@ describe("the tier's record writer bounds its own writes (issue #68, SPEC §5.5)
 				lines.length,
 				linesBefore + 140,
 				`mixed writers: line count != write count — a torn append merged or split records; ` +
-					`got ${lines.length}, expected ${linesBefore + 140}`,
+					`got ${lines.length}, expected ${linesBefore + 140}. This arm's records sit inside the ` +
+					`single-append size bound; raise the text past it and a torn line is the residual ` +
+					`.githooks/_lib.sh's audit_log header states, not a regression`,
 			);
 			assert.equal(
 				lines.filter((line) => line.includes("zqbashwriter")).length,
@@ -1026,6 +1029,97 @@ describe("activation and verification decide on LOCAL scope (issue #68, SPEC §4
 				globalBefore,
 				"global-origin foreign: the instrument rewrote the global gitconfig instead of the clone's own (§4.7)",
 			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The verdict the success line claims: `bound: verified` says the tier is
+// ARMED for this worktree, so the two shapes that pass a path comparison
+// while arming nothing are refused here — a directory that resolves outside
+// the repository, and one that carries no adapters for git to run. Each arm
+// opens with a same-run positive control: the unmutated fixture binds, so a
+// refusal below is the mutation and not a dead substrate.
+// ---------------------------------------------------------------------------
+
+describe("the arming verdict is refused where the adapters would not run (issue #68, SPEC §3.2, §5.2)", { skip: IS_WINDOWS }, () => {
+	it("a .githooks directory carrying no adapters does not report a verified bound state", () => {
+		const fixture = buildGithookFixture({ unbound: true });
+		try {
+			requireInstrument(fixture.root);
+			assertBindSucceeded(runBind(fixture.root), "adapters-present control");
+			for (const adapter of ["pre-commit", "pre-push", "commit-msg"]) {
+				rmSync(join(fixture.root, ".githooks", adapter), { force: true });
+			}
+			const run = runBind(fixture.root);
+			assert.notEqual(
+				run.status,
+				0,
+				`emptied adapters: the instrument reported a verified bound state for a hooks directory git ` +
+					`would run nothing from — the operator asked whether the tier is armed and was told yes ` +
+					`while every arm is dead\n${run.output}`,
+			);
+			assert.equal(
+				/pre-commit/.test(run.output),
+				true,
+				`emptied adapters: the refusal names no missing adapter, so the operator cannot act on it\n${run.output}`,
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("a .githooks directory that resolves outside the repository does not report a verified bound state", () => {
+		const fixture = buildGithookFixture({ unbound: true });
+		const outside = mkdtempSync(join(tmpdir(), "ghjig-escaped-hooks-"));
+		try {
+			requireInstrument(fixture.root);
+			assertBindSucceeded(runBind(fixture.root), "in-repository control");
+			cpSync(join(fixture.root, ".githooks"), join(outside, "githooks"), { recursive: true });
+			rmSync(join(fixture.root, ".githooks"), { recursive: true, force: true });
+			symlinkSync(join(outside, "githooks"), join(fixture.root, ".githooks"));
+			const run = runBind(fixture.root);
+			assert.notEqual(
+				run.status,
+				0,
+				`escaping hooks link: the instrument reported a verified bound state for a hooks directory ` +
+					`outside the repository — the runtime refuses that chain on every commit, so the arming ` +
+					`verdict and the runtime it predicts disagree\n${run.output}`,
+			);
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("a foreign hooks path reaches the terminal with its control bytes removed (issue #47)", () => {
+		const fixture = buildGithookFixture({ unbound: true });
+		try {
+			requireInstrument(fixture.root);
+			const hostile = `${join(fixture.root, "zqevil")}${cp(0x1b)}[31mZQRED${cp(0x1b)}]0;zqpwned${cp(0x07)} end`;
+			gitOut(fixture.root, ["config", "extensions.worktreeConfig", "true"]);
+			gitOut(fixture.root, ["config", "--worktree", "core.hooksPath", hostile]);
+			const run = runBind(fixture.root);
+			assert.notEqual(run.status, 0, `hostile hooksPath: the run did not refuse, so no message is measured\n${run.output}`);
+			assert.equal(
+				run.output.includes("ZQRED"),
+				true,
+				`hostile hooksPath: the refusal does not carry the value at all, so the byte-absence assertion ` +
+					`below would pass vacuously\n${JSON.stringify(run.output)}`,
+			);
+			for (const [name, byte] of [
+				["ESC", cp(0x1b)],
+				["BEL", cp(0x07)],
+			] as const) {
+				assert.equal(
+					run.output.includes(byte),
+					false,
+					`hostile hooksPath: a ${name} byte from a git-supplied value reached the operator's terminal ` +
+						`raw — the record writer strips it and this surface must too\n${JSON.stringify(run.output)}`,
+				);
+			}
 		} finally {
 			removeGithookFixture(fixture);
 		}

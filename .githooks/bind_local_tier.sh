@@ -85,6 +85,17 @@ unset GIT_REDIRECT_STDIN GIT_REDIRECT_STDOUT GIT_REDIRECT_STDERR
 # through the very global config the operator's git reads, and blinding this
 # instrument to it would answer about a repository state no consumer is ever
 # in. What that scope may and may not DECIDE is the split stated below.
+#
+# The consequence of the scrub, which the roster above is the whole census
+# of: a variable on it that the invoking shell carries is live for that
+# shell's own git and absent for every child here, so this run's verdict and
+# `git config --get core.hooksPath` typed in that same shell can differ.
+# The verdict is the one about the clone — the activation this run leaves is
+# persistent and per-clone, while the shell's answer travels with the
+# environment (measured: with GIT_CONFIG_COUNT=1, GIT_CONFIG_KEY_0=
+# core.hooksPath and GIT_CONFIG_VALUE_0 naming a foreign directory, this run
+# reports `bound: verified` in a shell whose own git reports that foreign
+# directory).
 GIT_NO_REPLACE_OBJECTS=1
 export GIT_NO_REPLACE_OBJECTS
 unset CDPATH
@@ -113,8 +124,11 @@ do_bind() {
     return 2
   fi
   # Root-only (§4.7): every write below lands at the repository top,
-  # wherever the instrument was invoked from.
+  # wherever the instrument was invoked from. The top is re-read PHYSICALLY
+  # after the cd, so the containment test below compares two physically
+  # resolved paths and never one of each.
   cd "$top" || { warn 'bind_local_tier.sh: cannot enter the repository top.'; return 2; }
+  top="$(pwd -P)" || { warn 'bind_local_tier.sh: cannot resolve the repository top.'; return 2; }
 
   # Activation: unset gets the relative spelling (per-worktree resolution);
   # a pre-set value is compared RESOLVED, never byte-wise.
@@ -138,6 +152,29 @@ do_bind() {
     warn 'bind_local_tier.sh: the committed .githooks directory is missing at the repository top - nothing to bind core.hooksPath to.'
     return 2
   fi
+  # The success line below says the tier is ARMED, so what it verifies is
+  # what the adapters need to run: the directory it binds to must lie under
+  # this repository (a `.githooks` link escaping the top resolves to a tree
+  # the tier's own prelude refuses at commit time — see `_lib.sh`'s
+  # derivation), and the three adapters git will execute must be there. The
+  # containment test is the one `_lib.sh` states, in the same quoted-pattern
+  # form so a repository path carrying glob bytes is matched literally, and
+  # against the same physically resolved pair. Presence is asked of the file
+  # and nothing more: no reviewer measured a non-executable adapter, so the
+  # predicate stays on the shape that was measured.
+  case "$_bd_want/" in
+    "$top"/*) ;;
+    *)
+      warn "bind_local_tier.sh: the .githooks directory at the repository top resolves outside this repository, so the committed adapters would not run there. This clone is NOT verified bound."
+      return 2
+      ;;
+  esac
+  for _bd_adapter in pre-commit pre-push commit-msg; do
+    if [ ! -f "$_bd_want/$_bd_adapter" ]; then
+      warn "bind_local_tier.sh: the committed adapter '$_bd_adapter' is missing from the .githooks directory, so binding core.hooksPath there would arm nothing. This clone is NOT verified bound."
+      return 2
+    fi
+  done
   _bd_hp="$(git config --local --get core.hooksPath </dev/null 2>/dev/null)" || _bd_hp=""
   if [ -z "$_bd_hp" ]; then
     git config --local core.hooksPath .githooks </dev/null || { warn 'bind_local_tier.sh: could not set core.hooksPath.'; return 2; }
@@ -216,12 +253,16 @@ do_bind() {
         _bd_eff_fix="find the file carrying it (git config --show-origin --get core.hooksPath) and clear it there"
         ;;
     esac
+    # The foreign value is git's to supply and this line is a terminal's to
+    # render, so the control bytes come out at the interpolation — the same
+    # `tr` the record writer in `_lib.sh` applies to every text it composes.
+    _bd_eff_shown="$(printf '%s' "$_bd_eff_hp" | LC_ALL=C tr -d '\000-\037\177')"
     # "is in place", not "was written": this arm is reached both from the
     # branch that wrote the local value and from the branch where the clone
     # already carried an equivalent one and nothing was written. The first
     # verification half above established that the value resolves; which run
     # put it there is not something this arm measured.
-    warn "bind_local_tier.sh: verification failed - the per-clone activation is in place in this clone's own config, but git resolves core.hooksPath to '$_bd_eff_hp' $_bd_eff_where, which outranks the local scope. The committed hooks would NOT fire, so this clone is NOT verified bound. To bind this clone, $_bd_eff_fix, then re-run: $RE_ARM"
+    warn "bind_local_tier.sh: verification failed - the per-clone activation is in place in this clone's own config, but git resolves core.hooksPath to '$_bd_eff_shown' $_bd_eff_where, which outranks the local scope. The committed hooks would NOT fire, so this clone is NOT verified bound. To bind this clone, $_bd_eff_fix, then re-run: $RE_ARM"
     return 6
   fi
   say 'bound: verified - the local git-hook tier is armed for this worktree (core.hooksPath + exclusion).'

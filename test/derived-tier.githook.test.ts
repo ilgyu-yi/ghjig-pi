@@ -742,7 +742,7 @@ describe("the record writer sanitizes free text at the write (issue #68, SPEC §
 		}
 	});
 
-	it("concurrent writers interleave whole records only", async () => {
+	it("concurrent writers interleave whole records only, at a record size inside the single-append bound", async () => {
 		const fixture = buildDerivedFixture();
 		try {
 			const sink = opSink(fixture.root);
@@ -783,7 +783,8 @@ describe("the record writer sanitizes free text at the write (issue #68, SPEC §
 				100,
 				`concurrent writers: the appended line count does not match the write count — an append merged ` +
 					`or split records, so one record no longer equals one line (§5.5); got ${lines.length - before} ` +
-					`of 100`,
+					`of 100. This arm's records sit inside the single-append size bound; raise the pad past it and ` +
+					`a torn line is the residual .githooks/_lib.sh's audit_log header states, not a regression`,
 			);
 			for (const line of lines) {
 				assert.doesNotThrow(
@@ -891,6 +892,168 @@ describe("the armed tier writes no code into the clone (issue #68, SPEC §4.2)",
 			);
 		} finally {
 			removeGithookFixture(fixture);
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The tier's own locations come from the adapters' installed position, not
+// from the top the invoking environment names. Two shapes measure it: a
+// `git commit` whose environment fabricates an ANCESTOR work tree, and an
+// alternate in-top installation of the same committed tree. Each arm carries
+// a same-run positive control in the same clone, so a refusal or a record
+// below is the shape and not a dead substrate.
+// ---------------------------------------------------------------------------
+
+interface NestedRepo {
+	/** Holds the repository and the fabricable ancestor; nothing is written outside it. */
+	tmp: string;
+	/** The directory a hostile GIT_WORK_TREE names — an ANCESTOR of the repository. */
+	ancestor: string;
+	root: string;
+}
+
+/** A repository nested one level inside its own scratch root, tier installed at `hooksRel`. */
+function buildNestedRepo(hooksRel: string): NestedRepo {
+	const tmp = mkdtempSync(join(tmpdir(), "ghjig-nested-"));
+	const ancestor = join(tmp, "ancestor");
+	const root = join(ancestor, "repo");
+	mkdirSync(join(root, "home"), { recursive: true });
+	const env = constructedEnv(root);
+	for (const args of [
+		["-c", "init.defaultBranch=zqnestedmain", "init", "-q"],
+		["config", "user.name", "fixture"],
+		["config", "user.email", "fixture@invalid"],
+		["config", "commit.gpgsign", "false"],
+	]) {
+		const result = spawnSync("git", args, { cwd: root, env, timeout: 30_000 });
+		if (result.status !== 0) {
+			throw new Error(`substrate: git ${args.join(" ")} exited ${result.status}`);
+		}
+	}
+	cpSync(join(repoRoot(), ".githooks"), join(root, hooksRel), { recursive: true });
+	// An ABSOLUTE hooks path: a relative one resolves against whatever work
+	// tree the environment names, so a fabricated ancestor would simply find
+	// no hooks and the arm would measure absence instead of derivation.
+	const set = spawnSync("git", ["config", "core.hooksPath", join(root, hooksRel)], {
+		cwd: root,
+		env,
+		timeout: 30_000,
+	});
+	if (set.status !== 0) {
+		throw new Error(`substrate: could not set core.hooksPath in ${root}`);
+	}
+	return { tmp, ancestor, root };
+}
+
+/** Stage a pattern-matching key and attempt a commit in `root` under `extra` env. */
+function commitUnder(root: string, name: string, extra: Record<string, string> = {}): { status: number | null; stderr: string } {
+	writeFileSync(join(root, name), `${AWS_SECRET}\n`);
+	const env = constructedEnv(root);
+	spawnSync("git", ["add", "--", name], { cwd: root, env, timeout: 30_000 });
+	const result = spawnSync("git", ["commit", "-q", "-m", "chore: exercise a derivation arm"], {
+		cwd: root,
+		env: { ...env, ...extra },
+		timeout: 60_000,
+	});
+	return { status: result.status, stderr: (result.stderr ?? Buffer.alloc(0)).toString("utf8") };
+}
+
+describe("the tier's locations derive from the adapters' installed position (issue #68, SPEC §4.6, §5.5)", { skip: IS_WINDOWS }, () => {
+	it("a fabricated ancestor work tree writes no record outside the repository, and does not go silent", () => {
+		const repo = buildNestedRepo(".githooks");
+		try {
+			const control = commitUnder(repo.root, "zqancestorctl.txt");
+			assert.notEqual(
+				control.status,
+				0,
+				`fabricated ancestor control: the clone's own chain allowed a staged key, so the probe that ` +
+					`follows would measure a dead fixture; stderr: ${JSON.stringify(control.stderr)}`,
+			);
+			const probe = commitUnder(repo.root, "zqancestorleak.txt", { GIT_WORK_TREE: repo.ancestor });
+			assert.equal(
+				existsSync(join(repo.ancestor, ".ghjig")),
+				false,
+				"fabricated ancestor: the tier created its state namespace at the directory the ENVIRONMENT " +
+					"named, outside the repository — the record boundary §5.5 draws is then the caller's to move, " +
+					"and the disarm notice lands where nothing the shell governs can read it",
+			);
+			assert.equal(
+				probe.stderr.includes("not enforced"),
+				true,
+				`fabricated ancestor: the tier neither enforced nor said so — a disarmed allow that reads on ` +
+					`every surface exactly like an enforced pass (§3.9); stderr: ${JSON.stringify(probe.stderr)}`,
+			);
+		} finally {
+			rmSync(repo.tmp, { recursive: true, force: true });
+		}
+	});
+
+	it("a ceiling on git's own discovery does not disarm the tier", () => {
+		const repo = buildNestedRepo(".githooks");
+		try {
+			const attempt = commitUnder(repo.root, "zqceilingleak.txt", { GIT_CEILING_DIRECTORIES: repo.root });
+			assert.notEqual(
+				attempt.status,
+				0,
+				`discovery ceiling: the staged key committed — a variable an operator sets for their own ` +
+					`reasons made the tier's own derivation fail, so every commit in that shell is a ` +
+					`non-enforcing allow; stderr: ${JSON.stringify(attempt.stderr)}`,
+			);
+		} finally {
+			rmSync(repo.tmp, { recursive: true, force: true });
+		}
+	});
+
+	it("an alternate in-top installation still resolves the committed pattern rules", () => {
+		const repo = buildNestedRepo(join("tools", "hooks"));
+		try {
+			assert.equal(
+				existsSync(join(repo.root, ".githooks")),
+				false,
+				"substrate: the alternate install left a .githooks directory, so a rule source spelled against " +
+					"the repository top would find it and the arm would measure nothing",
+			);
+			const attempt = commitUnder(repo.root, "zqaltinstallleak.txt");
+			assert.notEqual(
+				attempt.status,
+				0,
+				`alternate in-top install: the staged key committed — the secret arm alone is dead while the ` +
+					`rest of the tier looks alive, because its rule source was spelled against the repository ` +
+					`top rather than read beside the helper that reads it; stderr: ${JSON.stringify(attempt.stderr)}`,
+			);
+			assert.equal(
+				attempt.stderr.includes(AWS_PATTERN_ID),
+				true,
+				`alternate in-top install: the refusal does not name the pattern, so it is not the secret arm ` +
+					`that refused; stderr: ${JSON.stringify(attempt.stderr)}`,
+			);
+		} finally {
+			rmSync(repo.tmp, { recursive: true, force: true });
+		}
+	});
+
+	it("a disarmed secret scan says so on stderr, not only in the record", () => {
+		const repo = buildNestedRepo(".githooks");
+		try {
+			const control = commitUnder(repo.root, "zqdisarmctl.txt");
+			assert.notEqual(
+				control.status,
+				0,
+				`disarm control: the clone's own chain allowed a staged key, so the arm below measures a dead ` +
+					`fixture; stderr: ${JSON.stringify(control.stderr)}`,
+			);
+			rmSync(join(repo.root, ".githooks", "helpers", "secret-patterns"), { force: true });
+			const probe = commitUnder(repo.root, "zqdisarmleak.txt");
+			assert.equal(
+				probe.stderr.includes("staged-secret scan not enforced"),
+				true,
+				`disarmed scan: the scan disarmed and printed nothing — every other machinery degradation in ` +
+					`this tier prints a line, so this allow reads exactly like an enforced pass (§3.9); ` +
+					`stderr: ${JSON.stringify(probe.stderr)}`,
+			);
+		} finally {
+			rmSync(repo.tmp, { recursive: true, force: true });
 		}
 	});
 });
