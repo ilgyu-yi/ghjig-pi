@@ -13,6 +13,8 @@ There is no build step — the tree ships TypeScript sources that run directly. 
 - [`pi`](https://github.com/earendil-works/pi) available on `PATH` — the suite drives the real binary against disposable fixtures.
 - A Node.js runtime with native TypeScript type-stripping.
 
+To arm the local git-hook tier in a clone, run `bash .githooks/bind_local_tier.sh` — idempotent; full contract in SPEC §3.2/§4.7.
+
 Run the verification suite as:
 
 ```sh
