@@ -51,6 +51,7 @@ import { after, before, describe, it } from "node:test";
 import {
 	buildGithookFixture,
 	type CommitAttempt,
+	removeDelegatedHelpers,
 	fixtureGit,
 	type GithookFixture,
 	pushRefs,
@@ -324,10 +325,8 @@ describe("boundary pins — green in both tree states (issue #59)", { skip: IS_W
 	});
 
 	it("helper file absent: the push no-ops open, even to the protected identity", () => {
-		const fixture = buildGithookFixture({
-			helpersRelative: "helpers-absent",
-			remote: { defaultBranch: PROTECTED },
-		});
+		const fixture = buildGithookFixture({ remote: { defaultBranch: PROTECTED } });
+		removeDelegatedHelpers(fixture);
 		try {
 			seedLocalCommit(fixture);
 			const attempt = pushRefs(fixture, [PROTECTED]);
@@ -342,10 +341,8 @@ describe("boundary pins — green in both tree states (issue #59)", { skip: IS_W
 	});
 
 	it("helper present without is_protected_branch: the push no-ops open via githook_require", () => {
-		const fixture = buildGithookFixture({
-			helpersRelative: "helpers-stub",
-			remote: { defaultBranch: PROTECTED },
-		});
+		const fixture = buildGithookFixture({ remote: { defaultBranch: PROTECTED } });
+		removeDelegatedHelpers(fixture);
 		try {
 			writeFileSync(
 				join(fixture.helpersDir, "branch_guard.sh"),

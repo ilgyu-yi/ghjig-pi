@@ -1338,11 +1338,17 @@ describe("fail-posture inventory (§3.9)", () => {
 			"branch-guard-destination → closed",
 			"branch-guard-helper → open",
 			"branch-guard-helper → open",
+			"branch-guard-helper → open",
+			"commit-format-helper → open",
 			"commit-format-helper → open",
 			"commit-format-helper → open",
 			"commit-format-measurement → closed",
+			"local-tier-derivation → open",
+			"local-tier-derivation → open",
+			"local-tier-derivation → open",
 			"repo-root-discovery → open",
 			"seam-target → closed",
+			"secret-scan-helper → open",
 			"secret-scan-helper → open",
 			"secret-scan-helper → open",
 			"secret-scan-measurement → closed",
@@ -1352,6 +1358,116 @@ describe("fail-posture inventory (§3.9)", () => {
 		// shape (§3.9) — but two rows never share a failure shape.
 		const shapes = POSTURES.map((row) => row.failureShape);
 		assert.equal(new Set(shapes).size, shapes.length, "duplicate failureShape rows");
+	});
+
+	/**
+	 * Every fail-open control point in `.githooks/_lib.sh`: each non-comment
+	 * line that leaves the hook through `exit 0`. The slice runs from the shell
+	 * options line to the END OF THE FILE, not to the first function
+	 * definition — `githook_source`'s own fold is such a control point, and a
+	 * slice that stopped at the first function definition would stop exactly
+	 * where that fold begins and could never see it. The slice is lexical, so a
+	 * file that stops looking like this reddens the arms below rather than
+	 * silently measuring nothing.
+	 */
+	function libFailOpenPoints(): string[] {
+		const source = readFileSync(join(REPO_ROOT, ".githooks", "_lib.sh"), "utf8").split("\n");
+		const start = source.findIndex((line) => line.startsWith("set -"));
+		assert.ok(start >= 0, "the _lib.sh prelude no longer has a recognizable start");
+		return source
+			.slice(start)
+			.filter((line) => !/^\s*#/.test(line))
+			.filter((line) => /\bexit 0\b/.test(line))
+			// The record writer's own subshell leaves a RECORD, not the hook:
+			// its `exit 0` lines are the ones naming the sink or its `_ga_`
+			// locals, and none of them decides whether a check runs.
+			.filter((line) => !/_ga_|GHJIG_AUDIT_SINK/.test(line));
+	}
+
+	it("carries a local-tier-derivation row for every failure shape the prelude fails open on", () => {
+		const shapes = POSTURES.filter((row) => row.dependency === "local-tier-derivation").map(
+			(row) => row.failureShape,
+		);
+		// One regex per distinct shape in the prelude's census: an unresolvable
+		// repository top, a helper location outside it, and an adapter that
+		// cannot resolve its own installed position.
+		for (const [shape, matcher] of [
+			["unresolvable repository top", /repository top is unresolvable/i],
+			["helper location outside the repository top", /does not lie under the repository top/i],
+			["unresolvable installed position", /installed position is unresolvable/i],
+		] as const) {
+			assert.ok(
+				shapes.some((failureShape) => matcher.test(failureShape)),
+				`no local-tier-derivation row governs "${shape}", which .githooks/_lib.sh's prelude fails open on ` +
+					`(§3.9: one row per failure shape). Rows today: ${JSON.stringify(shapes, null, 2)}`,
+			);
+		}
+	});
+
+	it("carries a row for the incomplete-source shape under every helper dependency", () => {
+		// The shape happens in githook_source, once per helper dependency.
+		// `dependency` is one string per row, so one row cannot span two
+		// dependencies without mis-attributing one of them.
+		for (const dependency of ["secret-scan-helper", "branch-guard-helper", "commit-format-helper"]) {
+			const shapes = POSTURES.filter((row) => row.dependency === dependency).map((row) => row.failureShape);
+			assert.ok(
+				shapes.some((failureShape) => /its source does not complete/.test(failureShape)),
+				`no ${dependency} row governs "helper present, its source does not complete", which ` +
+					`githook_source turns into an allow for that arm and every arm after it ` +
+					`(§3.9: one row per failure shape). Rows today: ${JSON.stringify(shapes, null, 2)}`,
+			);
+		}
+	});
+
+	it("_lib.sh's fail-open census is the one the inventory was derived from", () => {
+		// The closure check on the two arms above: they enumerate shapes, and
+		// that enumeration is only as live as the file it was derived from. What
+		// this pins is the count of lines in .githooks/_lib.sh that fold the hook
+		// to `exit 0` — today the prelude's 4 derivation guards, githook_source's
+		// trap, and githook_require's fold. A control point added anywhere in the
+		// file, in any spelling, moves the count, and the author re-derives the
+		// census instead of inheriting a stale one.
+		const points = libFailOpenPoints();
+		assert.equal(
+			points.length,
+			6,
+			`.githooks/_lib.sh no longer carries the 6 fail-open control points the inventory's rows were ` +
+				`derived from — re-derive the census and give every distinct failure shape a row (§3.9): ` +
+				`${JSON.stringify(points, null, 2)}`,
+		);
+	});
+
+	it("every git child on the push surface reads stdin from /dev/null (SPEC §3.2)", () => {
+		// The pre-push adapter calls its predicate once per ref line git streams
+		// on stdin, so a child anywhere below that line which consumes stdin
+		// removes ref lines from the iteration and the arm measures fewer refs
+		// than the push carries. STRUCTURAL, because behaviour cannot reach it:
+		// the git subcommands these two files run do not read stdin on their
+		// own, so removing every redirect leaves the multi-ref-push arm green
+		// (measured) — the redirect is a bound on what a future
+		// subcommand or a future git may do, and only the spelling can be
+		// pinned. Both files the push surface sources are covered: the prelude
+		// and the branch-guard helper it delegates to.
+		for (const relative of [
+			join(".githooks", "_lib.sh"),
+			join(".githooks", "helpers", "branch_guard.sh"),
+		]) {
+			const children = readFileSync(join(REPO_ROOT, relative), "utf8")
+				.split("\n")
+				.filter((line) => !/^\s*#/.test(line) && /\bgit\s+[a-z-]/.test(line));
+			assert.ok(
+				children.length > 0,
+				`${relative} runs no git child at all — the arm below would hold vacuously`,
+			);
+			for (const line of children) {
+				assert.match(
+					line,
+					/<\s*\/dev\/null/,
+					`a git child in ${relative} does not read stdin from /dev/null, so it can consume the ref ` +
+						`lines the pre-push adapter iterates (§3.2): ${JSON.stringify(line)}`,
+				);
+			}
+		}
 	});
 
 	it("keys each row on a failure shape, not a component", () => {

@@ -9,20 +9,16 @@
  *     source before any arm runs — a fixture that re-arranges or edits the
  *     layout can go green while the real checkout stays inert, so the
  *     builder refuses to hand out a divergent copy;
- *   - `core.hooksPath` is set to `.githooks`, the binding a governed clone
- *     carries (§3.4);
- *   - an untracked `.ghjig/shell-adapter.sh` provides exactly the surface
- *     `.githooks/_lib.sh` requires of a per-clone binding: `safe_source`
- *     (fail-open non-zero on a missing helper file), `audit_log`
- *     (observable — appends one line per record to a fixture-local file the
- *     arms can read), and `GHJIG_SHELL_HELPERS`. The helper dir defaults to
- *     the fixture's copy of `.githooks/helpers` — the committed helper home
- *     (§4.1) — so behavioral arms measure the shipped helper bytes;
- *     degradation arms point it at a fixture-local dir they control.
+ *   - `core.hooksPath` is set to `.githooks`, which is the whole binding a
+ *     governed clone carries (§3.2): the adapters derive their helper
+ *     directory from their own installed position and their record sink
+ *     from the repository top, so the fixture writes nothing under
+ *     `.ghjig/` and a degradation arm mutates the fixture's own
+ *     `.githooks/helpers` — the layout every deployment runs.
  *
  * Every check drives `git commit` through this fixture, never a predicate
  * function directly, so the arms measure the chain an operator actually
- * runs: adapter → `_lib.sh` → helper dir → predicate → block.
+ * runs: `_lib.sh` → helper dir → predicate → block.
  *
  * The commit environment is CONSTRUCTED, never inherited wholesale: PATH is
  * passed through (git and bash must resolve), HOME is fixture-local,
@@ -69,28 +65,26 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { repoRoot } from "./run-pi.ts";
+import { AUDIT_FILE_NAME, repoRoot } from "./run-pi.ts";
 
 export interface GithookFixture {
 	root: string;
-	/** The directory the adapter's GHJIG_SHELL_HELPERS points at. */
+	/** The helper directory the adapters derive — the fixture's own `.githooks/helpers`. */
 	helpersDir: string;
-	/** Where the adapter's `audit_log` appends — one line per record. */
+	/** The record sink the tier derives from this fixture's repository top. */
 	auditFile: string;
 	/** Per-fixture counter; makes every commit attempt stage a fresh change. */
 	seq: number;
 }
 
 export interface GithookFixtureOptions {
-	/**
-	 * Where GHJIG_SHELL_HELPERS points, relative to the fixture root.
-	 * Default `.githooks/helpers` — the fixture copy of the committed
-	 * helper home (§4.1). Degradation arms override this to a dir whose
-	 * contents they author (absent helper, stub helper).
-	 */
-	helpersRelative?: string;
 	/** Add a fixture-local bare remote (see the header's push-substrate note). */
 	remote?: GithookRemoteOptions;
+	/**
+	 * Build the fixture UNBOUND (issue #68): no `core.hooksPath` — exactly
+	 * the state of a fresh clone before the committed bind instrument runs.
+	 */
+	unbound?: boolean;
 }
 
 export interface GithookRemoteOptions {
@@ -219,65 +213,60 @@ export function buildGithookFixture(options: GithookFixtureOptions = {}): Githoo
 	cpSync(sourceHooks, copiedHooks, { recursive: true });
 	assertTreesIdentical(sourceHooks, copiedHooks);
 
-	const helpersDir = join(root, options.helpersRelative ?? join(".githooks", "helpers"));
-	mkdirSync(helpersDir, { recursive: true });
-	const auditFile = join(root, "audit.log");
+	const helpersDir = join(root, ".githooks", "helpers");
+	const auditFile = join(root, ".ghjig", "state", AUDIT_FILE_NAME);
 
 	const fixture: GithookFixture = { root, helpersDir, auditFile, seq: 0 };
 	git(fixture, ["-c", "init.defaultBranch=main", "init", "-q"]);
 	git(fixture, ["config", "user.name", "fixture"]);
 	git(fixture, ["config", "user.email", "fixture@invalid"]);
 	git(fixture, ["config", "commit.gpgsign", "false"]);
-	git(fixture, ["config", "core.hooksPath", ".githooks"]);
-
-	mkdirSync(join(root, ".ghjig"));
-	writeFileSync(
-		join(root, ".ghjig", "shell-adapter.sh"),
-		[
-			"# .ghjig/shell-adapter.sh — per-clone binding stub (test substrate).",
-			"# Provides exactly the surface .githooks/_lib.sh requires of a binding:",
-			"# safe_source (fail-open non-zero on a missing helper), audit_log",
-			"# (appends one line per record to a fixture-local file), and",
-			"# GHJIG_SHELL_HELPERS.",
-			`GHJIG_SHELL_HELPERS='${helpersDir}'`,
-			"export GHJIG_SHELL_HELPERS",
-			"safe_source() {",
-			'  if [ -f "$1" ]; then',
-			'    . "$1"',
-			"    return $?",
-			"  fi",
-			'  audit_log warn "${2:-git-hook-tier}" helper-missing "$(basename -- "$1")" || true',
-			"  return 1",
-			"}",
-			"audit_log() {",
-			`  printf '%s\\n' "$*" >> '${auditFile}'`,
-			"}",
-			"",
-		].join("\n"),
-	);
-
+	if (!options.unbound) {
+		git(fixture, ["config", "core.hooksPath", ".githooks"]);
+	}
 	if (options.remote) {
-		const { defaultBranch, omitHeadPointer, danglingRemoteHead } = options.remote;
-		// Rename the unborn branch BEFORE the first commit so the fixture's
-		// local default and the remote's advertised default share one name.
-		git(fixture, ["symbolic-ref", "HEAD", `refs/heads/${defaultBranch}`]);
-		seedLocalCommit(fixture);
-		const remotePath = join(root, "remote.git");
-		git(fixture, ["init", "-q", "--bare", remotePath]);
-		git(fixture, ["--git-dir", remotePath, "symbolic-ref", "HEAD", `refs/heads/${defaultBranch}`]);
-		git(fixture, ["remote", "add", "origin", remotePath]);
-		// --no-verify: substrate, not measurement (header note). This push
-		// also creates refs/remotes/origin/<defaultBranch>, the tracking ref
-		// set-head requires — the order below is load-bearing.
-		git(fixture, ["push", "--no-verify", "-q", "origin", defaultBranch]);
-		if (!omitHeadPointer) {
-			git(fixture, ["remote", "set-head", "origin", defaultBranch]);
-		}
-		if (danglingRemoteHead) {
-			git(fixture, ["--git-dir", remotePath, "symbolic-ref", "HEAD", "refs/heads/ghjig-absent-branch"]);
-		}
+		finishRemoteSetup(fixture, options.remote);
 	}
 	return fixture;
+}
+
+/**
+ * Remove every delegated helper FILE from this fixture's derived helper
+ * directory — the "absent helper" degradation, staged where the tier
+ * actually looks (§4.1). A helper's committed DATA stays: the
+ * secret-pattern file is resolved repo-root-relative by whichever helper
+ * reads it (§3.3), so an arm that restores one real helper measures an
+ * armed one. The directory itself is left in place, so an arm that then
+ * writes one stub file measures exactly one present helper.
+ */
+export function removeDelegatedHelpers(fixture: GithookFixture): void {
+	for (const entry of readdirSync(fixture.helpersDir)) {
+		if (entry.endsWith(".sh")) {
+			rmSync(join(fixture.helpersDir, entry), { force: true });
+		}
+	}
+}
+
+function finishRemoteSetup(fixture: GithookFixture, options: GithookRemoteOptions): void {
+	const { defaultBranch, omitHeadPointer, danglingRemoteHead } = options;
+	// Rename the unborn branch BEFORE the first commit so the fixture's
+	// local default and the remote's advertised default share one name.
+	git(fixture, ["symbolic-ref", "HEAD", `refs/heads/${defaultBranch}`]);
+	seedLocalCommit(fixture);
+	const remotePath = join(fixture.root, "remote.git");
+	git(fixture, ["init", "-q", "--bare", remotePath]);
+	git(fixture, ["--git-dir", remotePath, "symbolic-ref", "HEAD", `refs/heads/${defaultBranch}`]);
+	git(fixture, ["remote", "add", "origin", remotePath]);
+	// --no-verify: substrate, not measurement (header note). This push
+	// also creates refs/remotes/origin/<defaultBranch>, the tracking ref
+	// set-head requires — the order below is load-bearing.
+	git(fixture, ["push", "--no-verify", "-q", "origin", defaultBranch]);
+	if (!omitHeadPointer) {
+		git(fixture, ["remote", "set-head", "origin", defaultBranch]);
+	}
+	if (danglingRemoteHead) {
+		git(fixture, ["--git-dir", remotePath, "symbolic-ref", "HEAD", "refs/heads/ghjig-absent-branch"]);
+	}
 }
 
 /** Run one fixture-scoped git command that must succeed (setup substrate). */

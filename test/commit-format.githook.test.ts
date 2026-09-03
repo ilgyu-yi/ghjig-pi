@@ -57,6 +57,7 @@ import {
 	buildGithookFixture,
 	type CommitAttempt,
 	commitWithMessage,
+	removeDelegatedHelpers,
 	type GithookFixture,
 	removeGithookFixture,
 } from "./harness/githook-fixture.ts";
@@ -120,7 +121,7 @@ describe("commit-format grammar and length at commit-msg (issue #55)", { skip: I
 	it("a grammar refusal lands one block audit record naming the class", () => {
 		assert.match(
 			grammarRefusal.auditDelta,
-			/\bblock\b.*commit-format/,
+			/"category":"commit-format","action":"block"/,
 			`expected a block record naming commit-format; this attempt appended: ${JSON.stringify(grammarRefusal.auditDelta)}`,
 		);
 	});
@@ -224,7 +225,7 @@ describe("unmeasurable input refuses, distinctly (issue #55, SPEC §3.9)", { ski
 	});
 
 	it("the environment-shape refusal lands an audit record (distinct from an allow's silence)", () => {
-		assert.match(environmentRefusal.auditDelta, /\bblock\b.*commit-format/, environmentRefusal.auditDelta);
+		assert.match(environmentRefusal.auditDelta, /"category":"commit-format","action":"block"/, environmentRefusal.auditDelta);
 	});
 
 	it("a broken environment with pure-ASCII input still passes — degradation refuses only what it would mis-measure", () => {
@@ -304,7 +305,8 @@ describe("chain degradation stays fail-open (issue #55 AC9)", { skip: IS_WINDOWS
 	// carve-out), which the armed helper must not break.
 
 	it("helper file absent: the hook no-ops and even a violating subject commits", () => {
-		const fixture = buildGithookFixture({ helpersRelative: "helpers-absent" });
+		const fixture = buildGithookFixture();
+		removeDelegatedHelpers(fixture);
 		try {
 			const attempt = commitWithMessage(fixture, GRAMMAR_VIOLATION);
 			assert.equal(
@@ -318,7 +320,8 @@ describe("chain degradation stays fail-open (issue #55 AC9)", { skip: IS_WINDOWS
 	});
 
 	it("helper present without check_commit_subject: the hook no-ops and even a violating subject commits", () => {
-		const fixture = buildGithookFixture({ helpersRelative: "helpers-stub" });
+		const fixture = buildGithookFixture();
+		removeDelegatedHelpers(fixture);
 		try {
 			writeFileSync(
 				join(fixture.helpersDir, "conventional_commit.sh"),
