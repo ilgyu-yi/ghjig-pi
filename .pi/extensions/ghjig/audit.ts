@@ -136,15 +136,24 @@ import { quoted } from "./quote.ts";
 export const AUDIT_FILE_NAME = "audit.jsonl";
 
 /**
- * Append-only, create-if-absent, never through a symlink (§4.6), and
- * never parked on a reader-less FIFO (`O_NONBLOCK` — see the header;
- * inert on the regular files that survive the verdict).
+ * The two flags that make an open at a shell-state path DECIDE rather than
+ * follow or block: never through a symlink (§4.6), and never parked on a
+ * reader-less FIFO (see the header; both are inert on the regular files
+ * that survive the verdict below).
+ *
+ * Exported because this sink is not the only file the runtime writes inside
+ * the shell's own namespace: the bind advisory's TTL stamp
+ * (`bind-state.ts`) opens with the same pair and holds its descriptor to
+ * the same `sinkRefusal` verdict. The hazard is one hazard, so it has one
+ * spelling — a second copy is a second thing to forget.
  */
-const SINK_FLAGS =
-	constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+export const STATE_WRITE_GUARD_FLAGS = constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
-/** Owner read/write only — the record at rest (§5.5). */
-const SINK_MODE = 0o600;
+/** Owner read/write only — any shell state file at rest (§5.5). */
+export const STATE_FILE_MODE = 0o600;
+
+/** Append-only, create-if-absent, and guarded as above. */
+const SINK_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | STATE_WRITE_GUARD_FLAGS;
 
 /**
  * Writes `line` to an open descriptor and returns only when every byte of
@@ -152,11 +161,15 @@ const SINK_MODE = 0o600;
  * over partial writes, where `writeSync` is one `write(2)` that reports a
  * short count as a success (see the header).
  *
- * Exported so the property can be measured where it is stageable (§3.12):
- * the descriptor `appendAuditRecord` hands this function has survived the
- * sink verdict, so it is a regular file — where its `O_NONBLOCK` is inert
- * — and a short write cannot be provoked through that surface, while on
- * a non-blocking PIPE descriptor it is one call away.
+ * Exported for two reasons now. It has a PRODUCTION caller outside this
+ * module: the bind advisory's TTL stamp (`bind-state.ts`) writes its one
+ * object through this function, on a descriptor it opened under the same
+ * guard flags — the write-all property is one property, so it has one
+ * spelling. And the property is measured through this export where it is
+ * stageable (§3.12): the descriptor `appendAuditRecord` hands this function
+ * has survived the sink verdict, so it is a regular file — where its
+ * `O_NONBLOCK` is inert — and a short write cannot be provoked through that
+ * surface, while on a non-blocking PIPE descriptor it is one call away.
  */
 export function writeRecordLine(fd: number, line: string): void {
 	writeFileSync(fd, line);
@@ -180,7 +193,11 @@ export interface SinkRefusal {
  * PATH without root (chown to another account and mknod both need root,
  * and `link(2)` from devfs is cross-device), so they are measured
  * against real `fstat` Stats of `/dev/null`, through this export — the
- * same device `writeRecordLine` and `recoveryFor` already are.
+ * same device `writeRecordLine` and `recoveryFor` already are. The export
+ * also has a PRODUCTION caller outside this module: the bind advisory's
+ * TTL stamp (`bind-state.ts`) holds its own opened descriptor to this
+ * verdict, and surfaces the refusal it returns — cause and recovery both —
+ * as one audit record. The hazard is one hazard, so it has one spelling.
  *
  * The recovery is arm-scoped (§3.11): the type/link/owner shapes are
  * hostile-input class and get the terse general act (make the path a
@@ -432,7 +449,7 @@ export function appendAuditRecord(stateRoot: string, input: AuditInput): boolean
 	// before the success-path close so the `finally` never closes it twice.
 	let leaked: number | undefined;
 	try {
-		const fd = openSync(sinkPath, SINK_FLAGS, SINK_MODE);
+		const fd = openSync(sinkPath, SINK_FLAGS, STATE_FILE_MODE);
 		leaked = fd;
 		// The verdict binds to the opened inode BEFORE any byte is written
 		// (see the header): a refusal degrades open through the same signal

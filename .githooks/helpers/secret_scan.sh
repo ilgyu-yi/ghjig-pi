@@ -1,13 +1,13 @@
 # .githooks/helpers/secret_scan.sh — the staged-secret class's delegated
 # scan (SPEC §3.3 secret row + staged-scan semantics statement; the
 # interface contract `.githooks/_lib.sh` states for this file). Sourced by
-# adapters through the per-clone binding, never executed; defines:
+# adapters, never executed; defines:
 #   scan_staged_secrets
 #
 # Rule source: the committed pattern file `.githooks/helpers/secret-patterns`,
-# resolved REPO-ROOT-relative (`git rev-parse --show-toplevel`), never
-# through the per-clone helper seam — the bytes both readers must agree on
-# are the committed repo file (§3.3's single-source rule). Format and the
+# resolved REPO-ROOT-relative (`git rev-parse --show-toplevel`) — the bytes
+# both readers must agree on are the committed repo file (§3.3's
+# single-source rule). Format and the
 # compatible-extension-only rule live in that file's header.
 #
 # Measurement domain (§3.3): the added text lines of the staged diff, per

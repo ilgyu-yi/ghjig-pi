@@ -35,6 +35,30 @@ export const POSTURES: readonly PostureRow[] = [
 		justification: "Additive observability never moves a fail direction (§3.8).",
 	},
 	{
+		dependency: "local-tier-derivation",
+		failureShape:
+			"the repository top is unresolvable, so neither the record sink nor the containment test below can be formed at all (.githooks/_lib.sh's prelude)",
+		posture: "open",
+		justification:
+			"Clone-shape state the acting party's git operation did not cause and cannot repair from inside a block (§3.9's machinery carve-out); the advice tier no-ops rather than wedging git (§3.2).",
+	},
+	{
+		dependency: "local-tier-derivation",
+		failureShape:
+			"the resolved helper location does not lie under the repository top the hook is running against (.githooks/_lib.sh's prelude)",
+		posture: "open",
+		justification:
+			"A tier that resolved its checks outside the repository it was invoked in would write its records there too, across the boundary §5.5 draws, so it runs no check and says so on stderr (§3.9's degradation-signal rule). No record is owed and none is written: the only sink this run could reach is the one the refusal exists to keep it out of.",
+	},
+	{
+		dependency: "local-tier-derivation",
+		failureShape:
+			"the running adapter's own installed position is unresolvable, so the helper directory cannot be derived (.githooks/_lib.sh's prelude)",
+		posture: "open",
+		justification:
+			"Enforcement-chain degradation on §3.9's absent-dependency side: an adapter that cannot locate itself was never installed here in a form the tier can use, and the acting party cannot repair that from inside a block; the advice tier no-ops rather than wedging git (§3.2).",
+	},
+	{
 		dependency: "commit-format-helper",
 		failureShape:
 			"helper file absent from the bound helper dir at commit time (githook_source's fail-open miss in .githooks/_lib.sh)",
@@ -49,6 +73,14 @@ export const POSTURES: readonly PostureRow[] = [
 		posture: "open",
 		justification:
 			"Enforcement-chain degradation, same carve-out (§3.9): a present-but-incomplete helper degrades to allow, never to a false block under a wrong cause (§3.2).",
+	},
+	{
+		dependency: "commit-format-helper",
+		failureShape:
+			"conventional_commit.sh present but its source does not complete — it exits while being sourced, fails to parse, or returns a non-zero status (githook_source's EXIT-trap fold and safe_source's non-zero-return record in .githooks/_lib.sh)",
+		posture: "open",
+		justification:
+			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; `exit` inside a sourced helper terminates the hook shell itself and would carry its status out to git, so the fold turns every shape of it into an allow for this arm and every arm after it (§3.2's arm ordering). The fold is not silent: one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). Residual (§3.11): two ways out of a source reach neither the fold's trap nor safe_source's return check and so fail CLOSED rather than landing on this row — `exec` replaces the process image (measured: `exec false` appended to a sourced helper — rc 1, no tier bytes on either stream), and a signal kills the shell (bash re-raises it once the trap has run, so git reports the death).",
 	},
 	{
 		dependency: "commit-format-measurement",
@@ -73,6 +105,14 @@ export const POSTURES: readonly PostureRow[] = [
 		posture: "open",
 		justification:
 			"Enforcement-chain degradation, same carve-out (§3.9): a present-but-incomplete helper degrades to allow, never to a false block under a wrong cause (§3.2).",
+	},
+	{
+		dependency: "branch-guard-helper",
+		failureShape:
+			"branch_guard.sh present but its source does not complete — it exits while being sourced, fails to parse, or returns a non-zero status (githook_source's EXIT-trap fold and safe_source's non-zero-return record in .githooks/_lib.sh)",
+		posture: "open",
+		justification:
+			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; the fold turns every shape of it into an allow for this arm and every arm after it (§3.2's arm ordering), with one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). The residual on the commit-format-helper source row — `exec` and signal termination — holds here too.",
 	},
 	{
 		dependency: "branch-guard-derivation",
@@ -113,6 +153,14 @@ export const POSTURES: readonly PostureRow[] = [
 		posture: "open",
 		justification:
 			"Enforcement-chain degradation, same carve-out (§3.9): a present-but-incomplete helper degrades to allow, never to a false block under a wrong cause (§3.2).",
+	},
+	{
+		dependency: "secret-scan-helper",
+		failureShape:
+			"secret_scan.sh present but its source does not complete — it exits while being sourced, fails to parse, or returns a non-zero status (githook_source's EXIT-trap fold and safe_source's non-zero-return record in .githooks/_lib.sh)",
+		posture: "open",
+		justification:
+			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; the fold turns every shape of it into an allow for this arm and every arm after it (§3.2's arm ordering), with one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). The residual on the commit-format-helper source row — `exec` and signal termination — holds here too.",
 	},
 	{
 		dependency: "secret-scan-patterns",
