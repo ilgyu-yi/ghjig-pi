@@ -11,10 +11,11 @@
  * pinned, harness-readable advisory surface.
  *
  * The advisory's STATE SET — which configurations are loud and which silent
- * — is the sibling suite's subject (`derived-bind-advisory.integration.ts`).
- * What is here is what that suite does not measure: the detector's
- * placement, its read-only rule, its child bound, and the TTL stamp's own
- * write guards.
+ * — is the sibling suite's subject
+ * (`derived-bind-advisory.integration.test.ts`). What is here is what that
+ * suite does not measure: the detector's placement, its read-only rule, its
+ * child bound, the TTL stamp's own write guards, and the `unbound` state's
+ * advisory shape, whose fixture the sibling does not carry.
  *
  * ANTI-VACUITY (per-arm, stated in place):
  *   - silence is the advisory's contract for one state and its failure

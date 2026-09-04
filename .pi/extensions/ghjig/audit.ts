@@ -325,28 +325,30 @@ function componentKind(path: string): "directory" | "other" | "absent" {
 /**
  * The recovery live at THIS surface for the failure that actually
  * occurred (§3.11 — arm-scoped remediation; a message naming a dead
- * recovery is worse than one naming none). Each arm names a different
- * object as the one to repair:
+ * recovery is worse than one naming none). Every write this shell makes
+ * under the state root reaches here — the record append and the bind
+ * advisory's TTL stamp alike — so the arms name the WRITE and its PATH,
+ * never one caller's sink. Each arm names a different object to repair:
  *
  *   - the destination directory is absent — create it;
  *   - an ancestor of it is a plain file (`ENOTDIR`) — nothing can be
  *     created beneath a file, so the fix is at that component, never at
- *     the sink path the append named;
+ *     the path the write named;
  *   - the destination directory refuses the create (`EACCES` with no
- *     sink measurable there) — the sink cannot be made anything at all,
- *     so the fix is the directory's mode;
- *   - the filesystem has no room for the record (`ENOSPC`, `EDQUOT`) —
+ *     write path measurable there) — that path cannot be made anything
+ *     at all, so the fix is the directory's mode;
+ *   - the filesystem has no room for the write (`ENOSPC`, `EDQUOT`) —
  *     the object is that filesystem's free space or this account's
- *     quota, and nothing at the sink path is misconfigured;
+ *     quota, and nothing at the write path is misconfigured;
  *   - the mount refuses writes (`EROFS`) — the object is the mount; no
- *     mode at the sink path admits the record while it holds;
- *   - the device or transport failed (`EIO`) — no act at the sink path
- *     recovers a record the filesystem has already refused, so the
+ *     mode at the write path admits the write while it holds;
+ *   - the device or transport failed (`EIO`) — no act at the write path
+ *     recovers a write the filesystem has already refused, so the
  *     message names the filesystem's health and stops there rather than
  *     prescribing a repair that would not have helped;
- *   - the sink path itself is unusable — make it a plain, owner-writable
+ *   - the write path itself is unusable — make it a plain, owner-writable
  *     file. This is the general arm, and the arms above exist so that it
- *     is reached only where the sink really is the object that failed
+ *     is reached only where that path really is the object that failed
  *     (a directory, a symlink, another account's file).
  *
  * The last three arms are the DELAYED-WRITE class the fail posture above
@@ -362,9 +364,9 @@ function componentKind(path: string): "directory" | "other" | "absent" {
  * honest is a RULE, stated here rather than a roster of the shapes it
  * generates, because the roster is what a later code silently falsifies
  * (§2.4, §3.11): the general arm's act — make the path a plain,
- * owner-writable file — is live exactly when the sink path is the object
+ * owner-writable file — is live exactly when the write path is the object
  * that failed. Every unmodelled failure whose object lies elsewhere
- * carries a dead act, and what it delivers is the cause alone; the append
+ * carries a dead act, and what it delivers is the cause alone; the write
  * still degrades open, with no repair named that would have helped. Such
  * a shape earns an arm when it acquires an act an operator can perform at
  * a named object, and not before.
@@ -374,14 +376,14 @@ function componentKind(path: string): "directory" | "other" | "absent" {
  * filled, no mount is remounted, no device is broken (§3.12) — is still
  * owed a pin on which recovery it selects, and that pin is a call.
  */
-export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string): string {
+export function recoveryFor(error: unknown, stateRoot: string, writePath: string): string {
 	const code = (error as { code?: string } | null)?.code;
 	if (code === "ENOENT") {
 		return `create the state directory ${quoted(stateRoot)} (mkdir -p), then re-run.`;
 	}
 	if (code === "ENOTDIR") {
 		return (
-			`replace ${quoted(nonDirectoryAncestor(sinkPath) ?? stateRoot)} with a directory — it is not one, ` +
+			`replace ${quoted(nonDirectoryAncestor(writePath) ?? stateRoot)} with a directory — it is not one, ` +
 			`and nothing can be created beneath a plain file — then create ${quoted(stateRoot)} (mkdir -p) and re-run.`
 		);
 	}
@@ -394,7 +396,7 @@ export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string)
 	// destination whose own mode refuses the stat answers false here with a
 	// sink sitting inside it, and that is still this arm's object, so the
 	// message must not assert an absence it did not establish.
-	if (code === "EACCES" && !existsSync(sinkPath) && componentKind(stateRoot) === "directory") {
+	if (code === "EACCES" && !existsSync(writePath) && componentKind(stateRoot) === "directory") {
 		return (
 			`grant this account write and search permission on the state directory ` +
 			`${quoted(stateRoot)} (chmod u+wx), then re-run — until its mode admits this account the file there ` +
@@ -403,27 +405,27 @@ export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string)
 	}
 	if (code === "ENOSPC" || code === "EDQUOT") {
 		return (
-			`free space on the filesystem holding ${quoted(sinkPath)}, or raise this account's quota on it, ` +
+			`free space on the filesystem holding ${quoted(writePath)}, or raise this account's quota on it, ` +
 			`then re-run — the write was refused for want of room, not for want of permission, ` +
 			`so nothing at that path is misconfigured and no mode there admits it.`
 		);
 	}
 	if (code === "EROFS") {
 		return (
-			`remount the filesystem holding ${quoted(sinkPath)} read-write, or point the state root at a ` +
+			`remount the filesystem holding ${quoted(writePath)} read-write, or point the state root at a ` +
 			`writable filesystem, then re-run — while the mount refuses writes no permission or mode ` +
 			`at that path can admit the write.`
 		);
 	}
 	if (code === "EIO") {
 		return (
-			`no act at ${quoted(sinkPath)} restores this write: it reached the filesystem and the device or ` +
+			`no act at ${quoted(writePath)} restores this write: it reached the filesystem and the device or ` +
 			`transport under it reported an error, so what was being written is lost. Restore the health ` +
 			`of that filesystem — for a network mount, its connection — then re-run.`
 		);
 	}
 	return (
-		`make ${quoted(sinkPath)} a plain file writable by this account, then re-run — ` +
+		`make ${quoted(writePath)} a plain file writable by this account, then re-run — ` +
 		`a directory, a FIFO, a symlink, or another account's file at that path all refuse the write ` +
 		`(a symlink at that final component is refused rather than followed, and a reader-less FIFO raises ENXIO at ` +
 		`the open; a symlink at a PARENT is still followed — that ancestor policy belongs to the state-root seam (§5.5)).`
