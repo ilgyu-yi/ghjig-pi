@@ -24,11 +24,9 @@
  *      the refusal's own observables (non-zero status + the adapter's live
  *      recovery line + the pattern ID on stderr), never on the record sink,
  *      because the sink is what the next assertion is ABOUT.
- *   2. THE SINK MOVED WITH THE NAMESPACE — the refusal record lands at
- *      `<top>/.gitjig/state/audit.jsonl`. This is the red-first half: the
- *      committed `_lib.sh` still derives the OLD container today, so the
- *      asserted file does not exist and this assertion is the suite's
- *      intentional failure.
+ *   2. THE SINK FOLLOWS THE NAMESPACE — the refusal record lands at
+ *      `<top>/.gitjig/state/audit.jsonl`. A tier whose records stop
+ *      following its own container writes them where nothing reads.
  *   3. NO RE-ARM WAS REQUIRED — the clone's stored `core.hooksPath` is
  *      byte-identical to what arming set, before and after the measured
  *      commit. A tier that survives the move by silently rewriting the
@@ -149,15 +147,14 @@ describe("a clone armed before the namespace move needs no re-arm (issue #75, SP
 				`the refusal's stderr does not name pattern '${PATTERN_ID}' — the refusal is not the staged-secret one`,
 			);
 
-			// 2. The sink moved with the namespace (RED TODAY: `_lib.sh` still
-			//    derives the retired container, so this path does not exist).
+			// 2. The sink follows the namespace.
 			const sink = contractSink(fixture);
 			assert.equal(
 				existsSync(sink),
 				true,
 				`no record sink at <top>/${STATE_CONTAINER}/state/${AUDIT_FILE_NAME} — the tier refused the ` +
-					`commit but wrote its record somewhere else, so an armed clone's records did not follow the ` +
-					`namespace move (red until the Code phase moves the derived container; SPEC §2.5)`,
+					`commit but wrote its record somewhere else, so an armed clone's records do not follow its ` +
+					`own state container (SPEC §2.5)`,
 			);
 			const records = readFileSync(sink, "utf8");
 			assert.match(
