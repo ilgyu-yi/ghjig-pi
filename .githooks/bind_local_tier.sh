@@ -434,16 +434,11 @@ do_bind() {
     git check-ignore -q -- .ghjig/state/audit.jsonl </dev/null 2>/dev/null
     _bd_ci_rc=$?
     if [ "$_bd_ci_rc" -eq 1 ]; then
-      # The message states the measured state and names no lookup: where this
-      # re-ask exits 1, `check-ignore -v` prints nothing, and `-v
-      # --non-matching` prints only the record `git help check-ignore`
-      # documents with "all fields ... except for <pathname> ... empty".
       warn "bind_local_tier.sh: the exclusion line is present in '$_bd_excl_shown', but git still reports .ghjig/ as not ignored, so the shell's own state would be visible to version control here. This clone is NOT verified bound. Re-run from the repository root once git ignores that path: $RE_ARM"
       return 2
     fi
     # The success line names the exclusion only where this re-ask ANSWERED.
-    # `git help check-ignore` documents a third exit status, 128; no suite run
-    # reaches it, and forcing this branch never taken leaves the suite green.
+    # `git help check-ignore` documents a third exit status, 128.
     if [ "$_bd_ci_rc" -ne 0 ]; then
       _bd_verified=' (core.hooksPath)'
     fi
