@@ -41,6 +41,7 @@ import { spawn, spawnSync } from "node:child_process";
 import {
 	accessSync,
 	appendFileSync,
+	chmodSync,
 	closeSync,
 	constants,
 	cpSync,
@@ -446,6 +447,202 @@ describe("exclusion at creation, both ways (issue #68 AC4, SPEC §4.1)", { skip:
 				true,
 				`worktree exclude fallback: no .ghjig exclusion at the resolved ${excludeFile}`,
 			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The exclusion fallback is a shell append at a path git resolves, so it
+// carries the record writer's own hazard: a link at the leaf, or at the one
+// directory component this instrument creates, sends the append somewhere
+// the operator never named. The predicate is the sibling's, at
+// `.githooks/_lib.sh`'s record writer — a link refusal at each component
+// plus a regular-file test at the leaf. A MISSING exclude file still gets
+// created and appended: that is the normal fallback, and refusing it would
+// be a false block on the adopting-repository path this instrument serves.
+// ---------------------------------------------------------------------------
+
+describe("the exclusion fallback refuses to write through a link (issue #68 AC4, SPEC §5.5)", { skip: IS_WINDOWS }, () => {
+	it("a symlinked info/exclude gains no append, and the run reports no bound state", () => {
+		const fixture = buildGithookFixture({ unbound: true });
+		const outside = mkdtempSync(join(tmpdir(), "ghjig-exclude-victim-"));
+		try {
+			requireInstrument(fixture.root);
+			const victim = join(outside, "zqvictim.txt");
+			const original = "zqoriginal victim content\n";
+			writeFileSync(victim, original);
+			const excludeFile = resolvedExcludePath(fixture.root);
+			mkdirSync(dirname(excludeFile), { recursive: true });
+			rmSync(excludeFile, { force: true });
+			symlinkSync(victim, excludeFile);
+
+			const run = runBind(fixture.root);
+			assert.equal(
+				readFileSync(victim, "utf8"),
+				original,
+				"linked info/exclude: the append landed on a file outside the repository, through the link " +
+					"the writer never asked about (§5.5)",
+			);
+			assert.equal(
+				lstatSync(excludeFile).isSymbolicLink(),
+				true,
+				"linked info/exclude: substrate — the link no longer stands, so the arm measured something else",
+			);
+			assert.notEqual(
+				run.status,
+				0,
+				`linked info/exclude: the run reported success over a write it did not make\n${run.output}`,
+			);
+			assert.equal(
+				/bound: verified/.test(run.output),
+				false,
+				`linked info/exclude: the success line was printed for a refused exclusion\n${run.output}`,
+			);
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("a MISSING info/exclude is still created and appended — the refusal does not reach the normal fallback", () => {
+		const fixture = buildGithookFixture({ unbound: true });
+		try {
+			requireInstrument(fixture.root);
+			const excludeFile = resolvedExcludePath(fixture.root);
+			rmSync(excludeFile, { force: true });
+			rmSync(dirname(excludeFile), { recursive: true, force: true });
+			assertBindSucceeded(runBind(fixture.root), "absent info/exclude");
+			assert.equal(
+				readFileSync(excludeFile, "utf8").includes(".ghjig"),
+				true,
+				"absent info/exclude: the fallback did not create and append the exclusion — the guard above " +
+					"turned the instrument's normal path into a false block",
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Two spellings of the LOCAL `core.hooksPath` the read has to keep apart.
+// An ABSENT key and one set to the empty string hand back the same empty
+// value and different exit statuses, and only the status separates a fresh
+// clone (activate) from a clone whose operator chose "run no hooks" (never
+// overwrite, §4.7). And a `~/`-spelled value is one git expands and honours,
+// so an equivalent spelling of the committed adapters must read as the
+// equivalence it is, not as a foreign target.
+// ---------------------------------------------------------------------------
+
+describe("the local hooksPath read keeps empty apart from absent (issue #68 AC3, SPEC §4.7)", { skip: IS_WINDOWS }, () => {
+	it("substrate: git itself separates the two by exit status alone", () => {
+		const fixture = buildGithookFixture({ unbound: true });
+		try {
+			const read = (): { status: number | null; value: string } => {
+				const result = spawnSync("git", ["config", "--local", "--get", "core.hooksPath"], {
+					cwd: fixture.root,
+					env: constructedEnv(fixture.root),
+					timeout: 30_000,
+				});
+				return { status: result.status, value: (result.stdout ?? Buffer.alloc(0)).toString("utf8").trim() };
+			};
+			const absent = read();
+			fixtureGit(fixture, ["config", "--local", "core.hooksPath", ""]);
+			const empty = read();
+			assert.deepEqual(
+				[absent.value, empty.value],
+				["", ""],
+				"substrate: the two spellings no longer hand back the same value, so the arm below measures " +
+					"a distinction the reader could have made from the value",
+			);
+			assert.equal(absent.status, 1, "substrate: an absent key no longer exits 1");
+			assert.equal(empty.status, 0, "substrate: an explicitly empty value no longer exits 0");
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("an explicitly empty local value is never overwritten, and survives the refused run byte-identical", () => {
+		const fixture = buildGithookFixture({ unbound: true });
+		try {
+			requireInstrument(fixture.root);
+			fixtureGit(fixture, ["config", "--local", "core.hooksPath", ""]);
+			const configPath = join(fixture.root, ".git", "config");
+			const before = readFileSync(configPath);
+			const run = runBind(fixture.root);
+			assert.notEqual(
+				run.status,
+				0,
+				`explicitly empty local value: the instrument reported a bound state over a setting it ` +
+					`overwrote — a value this clone carries is its target's choice (§4.7)\n${run.output}`,
+			);
+			assert.deepEqual(
+				readFileSync(configPath),
+				before,
+				"explicitly empty local value: the clone's own config is not byte-identical after the refused " +
+					"run — the never-overwrite AC binds every value this clone carries, not only non-empty ones",
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("an ABSENT local value still activates — the fresh-clone path this instrument exists for", () => {
+		const fixture = buildGithookFixture({ unbound: true });
+		try {
+			requireInstrument(fixture.root);
+			assertBindSucceeded(runBind(fixture.root), "absent local value");
+			assert.equal(
+				gitOut(fixture.root, ["config", "--local", "--get", "core.hooksPath"]),
+				".githooks",
+				"absent local value: the activation did not land, so the empty/absent discrimination was " +
+					"bought with a false block on every fresh clone",
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+});
+
+describe("a ~/-spelled hooksPath is compared as git resolves it (issue #68 AC2, SPEC §4.7)", { skip: IS_WINDOWS }, () => {
+	it("a tilde spelling of this clone's own adapters is an equivalent spelling, not a foreign target", () => {
+		const fixture = buildGithookFixture({ unbound: true });
+		try {
+			requireInstrument(fixture.root);
+			// runBind and the fixture's git both take HOME=<root>/home, so the
+			// tilde expands inside the fixture and nothing is planted on the host.
+			symlinkSync(join(fixture.root, ".githooks"), join(fixture.root, "home", "zqequiv-githooks"));
+			fixtureGit(fixture, ["config", "--local", "core.hooksPath", "~/zqequiv-githooks"]);
+
+			const run = runBind(fixture.root);
+			assertBindSucceeded(run, "tilde-spelled equivalent");
+			assert.match(
+				run.output,
+				/equivalen/i,
+				`tilde-spelled equivalent: the run did not name the equivalence — a spelling git expands to ` +
+					`this clone's own adapters was read as a foreign target (§4.7)\n${run.output}`,
+			);
+			assert.equal(
+				gitOut(fixture.root, ["config", "--local", "--get", "core.hooksPath"]),
+				"~/zqequiv-githooks",
+				"tilde-spelled equivalent: the no-op rewrote the operator's spelling",
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("the chain that spelling arms actually fires, which is what the verdict above claims", () => {
+		const fixture = buildGithookFixture({ remote: { defaultBranch: PROTECTED } });
+		try {
+			fixtureGit(fixture, ["checkout", "-q", "-b", FEATURE]);
+			symlinkSync(join(fixture.root, ".githooks"), join(fixture.root, "home", "zqequiv-githooks"));
+			fixtureGit(fixture, ["config", "--local", "core.hooksPath", "~/zqequiv-githooks"]);
+			stageFile(fixture, "zqtildeleak.txt", `${AWS_SECRET}\n`);
+			const attempt = commitWithMessage(fixture, "chore: exercise the tilde-spelled chain\n");
+			assertSecretRefused(attempt, "zqtildeleak.txt", "tilde-spelled chain");
 		} finally {
 			removeGithookFixture(fixture);
 		}
@@ -1037,9 +1234,10 @@ describe("activation and verification decide on LOCAL scope (issue #68, SPEC §4
 
 // ---------------------------------------------------------------------------
 // The verdict the success line claims: `bound: verified` says the tier is
-// ARMED for this worktree, so the two shapes that pass a path comparison
-// while arming nothing are refused here — a directory that resolves outside
-// the repository, and one that carries no adapters for git to run. Each arm
+// ARMED for this worktree, so the shapes that pass a path comparison while
+// arming nothing are refused here — a directory that resolves outside the
+// repository, and adapter files that are absent, empty, or not executable by
+// this account, none of which put a check in front of a commit. Each arm
 // opens with a same-run positive control: the unmutated fixture binds, so a
 // refusal below is the mutation and not a dead substrate.
 // ---------------------------------------------------------------------------
@@ -1070,6 +1268,83 @@ describe("the arming verdict is refused where the adapters would not run (issue 
 			removeGithookFixture(fixture);
 		}
 	});
+
+	/**
+	 * Two shapes a presence probe passes and git arms nothing from: an
+	 * adapter emptied in place with its exec bit intact (git runs it, and it
+	 * decides nothing), and one that lost its exec bit (git skips it). Both
+	 * defeat every arm of the tier at once while the operator's own
+	 * "is it armed?" command answers yes, so each is measured through a
+	 * `git commit` in the same fixture as well as through the verdict.
+	 */
+	for (const shape of [
+		{
+			label: "emptied in place, exec bit intact",
+			marker: "zqemptied",
+			mutate(root: string): void {
+				for (const adapter of ["pre-commit", "pre-push", "commit-msg"]) {
+					writeFileSync(join(root, ".githooks", adapter), "");
+				}
+			},
+		},
+		{
+			label: "present but not executable",
+			marker: "zqnoexec",
+			mutate(root: string): void {
+				for (const adapter of ["pre-commit", "pre-push", "commit-msg"]) {
+					chmodSync(join(root, ".githooks", adapter), 0o644);
+				}
+			},
+		},
+	] as const) {
+		it(`adapters ${shape.label} do not report a verified bound state`, () => {
+			const fixture = buildGithookFixture({ unbound: true });
+			try {
+				requireInstrument(fixture.root);
+				assertBindSucceeded(runBind(fixture.root), `${shape.marker} control`);
+				shape.mutate(fixture.root);
+				const run = runBind(fixture.root);
+				assert.notEqual(
+					run.status,
+					0,
+					`${shape.label}: the instrument reported a verified bound state for adapters that arm ` +
+						`nothing — the operator asked whether the tier is armed and was told yes while every ` +
+						`arm is dead\n${run.output}`,
+				);
+				assert.equal(
+					/pre-commit/.test(run.output),
+					true,
+					`${shape.label}: the refusal names no adapter, so the operator cannot act on it\n${run.output}`,
+				);
+			} finally {
+				removeGithookFixture(fixture);
+			}
+		});
+
+		it(`adapters ${shape.label} let a staged secret through, which is what the verdict above predicts`, () => {
+			const fixture = buildArmedScanFixture();
+			try {
+				const marker = `${shape.marker}ctl.txt`;
+				stageFile(fixture, marker, `${AWS_SECRET}\n`);
+				const control = commitWithMessage(fixture, "chore: exercise the arming control\n");
+				assertSecretRefused(control, marker, `${shape.label} control`);
+				fixtureGit(fixture, ["reset", "-q", "--", marker]);
+				rmSync(join(fixture.root, marker), { force: true });
+				shape.mutate(fixture.root);
+				const leak = `${shape.marker}leak.txt`;
+				stageFile(fixture, leak, `${AWS_SECRET}\n`);
+				const attempt = commitWithMessage(fixture, "no format at all\n");
+				assert.equal(
+					attempt.status,
+					0,
+					`${shape.label}: substrate — the mutated chain still refused, so the verdict arm above ` +
+						`would be answering about a live tier; stderr: ${JSON.stringify(attempt.stderr)}`,
+				);
+			} finally {
+				removeGithookFixture(fixture);
+			}
+		});
+	}
 
 	it("a .githooks directory that resolves outside the repository does not report a verified bound state", () => {
 		const fixture = buildGithookFixture({ unbound: true });

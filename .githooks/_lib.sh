@@ -36,6 +36,13 @@
 # would silently starve it.
 set -uo pipefail
 
+# CDPATH moves the very `cd` the self-location below is built on: git hands
+# the adapter a relative argv, so `dirname` yields an operand with no `./`
+# prefix and `cd` searches CDPATH's entries before the cwd. Unset here,
+# before the first cd, and inherited by every helper this file sources into
+# its own shell.
+unset CDPATH
+
 # Two tops, both resolved PHYSICALLY (cd + pwd -P) so the comparison below
 # reads real paths and never spellings.
 #

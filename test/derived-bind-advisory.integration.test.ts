@@ -34,7 +34,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -324,9 +324,10 @@ describe("the classifier resolves the configuration the consumer's git resolves 
 
 // ---------------------------------------------------------------------------
 // `bound` is the SILENT state, so the classifier reaches it only where the
-// adapters would actually run. Two shapes pass the resolved-path compare and
-// arm nothing: a hooks directory that resolves outside the repository, and
-// one carrying no adapters. Each arm derives its own positive control from
+// adapters would actually run. The shapes measured here all pass the
+// resolved-path compare and arm nothing: a hooks directory that resolves
+// outside the repository, and adapter files that are absent, empty, or not
+// executable by this account. Each arm derives its own positive control from
 // the same fixture before mutating it, so a degraded verdict below is the
 // mutation and never a dead substrate.
 // ---------------------------------------------------------------------------
@@ -365,6 +366,53 @@ describe("the classifier does not report bound where the adapters would not run 
 		}
 	});
 
+	/**
+	 * Two more shapes that pass a presence probe and arm nothing: an adapter
+	 * emptied in place with its exec bit intact, which git runs as a no-op,
+	 * and one that lost its exec bit, which git skips. `bound` is the silent
+	 * state, so classifying either as `bound` means session start says
+	 * nothing about a clone whose commits fire no check at all.
+	 */
+	for (const shape of [
+		{
+			label: "emptied in place, exec bit intact",
+			mutate(hooks: string): void {
+				for (const adapter of ["pre-commit", "pre-push", "commit-msg"]) {
+					writeFileSync(join(hooks, adapter), "");
+				}
+			},
+		},
+		{
+			label: "present but not executable",
+			mutate(hooks: string): void {
+				for (const adapter of ["pre-commit", "pre-push", "commit-msg"]) {
+					chmodSync(join(hooks, adapter), 0o644);
+				}
+			},
+		},
+	] as const) {
+		it(`a bound clone whose adapters are ${shape.label} is classified degraded`, () => {
+			const root = boundRepo();
+			try {
+				assert.equal(
+					computeBindState(root),
+					"bound",
+					"substrate: the unmutated clone did not classify bound, so the mutation below measures nothing",
+				);
+				shape.mutate(join(root, ".githooks"));
+				assert.equal(
+					computeBindState(root),
+					"foreign-bound",
+					`adapters ${shape.label}: the classifier reported \`bound\` — the SILENT state — for a ` +
+						"clone whose commits fire nothing, so session start says nothing and no surface " +
+						"reports the disarm (§5.2)",
+				);
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
+	}
+
 	it("a bound clone whose hooks directory escapes the repository is classified degraded", () => {
 		const root = boundRepo();
 		const outside = mkdtempSync(join(tmpdir(), "ghjig-armverdict-outside-"));
@@ -385,6 +433,37 @@ describe("the classifier does not report bound where the adapters would not run 
 			);
 		} finally {
 			rmSync(outside, { recursive: true, force: true });
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("a ~/-spelled hooks path resolving to this clone's own adapters is classified bound", () => {
+		const root = boundRepo();
+		const home = join(root, "home");
+		const savedHome = process.env.HOME;
+		try {
+			assert.equal(
+				computeBindState(root),
+				"bound",
+				"substrate: the unmutated clone did not classify bound, so the re-spelling below measures nothing",
+			);
+			symlinkSync(join(root, ".githooks"), join(home, "zqequiv-githooks"));
+			runGit(root, home, ["config", "--local", "core.hooksPath", "~/zqequiv-githooks"]);
+			// The classifier's own git child takes HOME from this process, so the
+			// tilde expands inside the fixture and nothing is planted on the host.
+			process.env.HOME = home;
+			assert.equal(
+				computeBindState(root),
+				"bound",
+				"tilde spelling: the classifier read a spelling git expands to this clone's own committed " +
+					"adapters as foreign, and would advise a degraded state on a clone whose tier fires (§5.2)",
+			);
+		} finally {
+			if (savedHome === undefined) {
+				delete process.env.HOME;
+			} else {
+				process.env.HOME = savedHome;
+			}
 			rmSync(root, { recursive: true, force: true });
 		}
 	});

@@ -1346,6 +1346,8 @@ describe("fail-posture inventory (§3.9)", () => {
 			"local-tier-derivation → open",
 			"local-tier-derivation → open",
 			"local-tier-derivation → open",
+			"local-tier-derivation → open",
+			"local-tier-exclusion → closed",
 			"repo-root-discovery → open",
 			"seam-target → closed",
 			"secret-scan-helper → open",
@@ -1389,11 +1391,16 @@ describe("fail-posture inventory (§3.9)", () => {
 			(row) => row.failureShape,
 		);
 		// One regex per distinct shape in the prelude's census: an unresolvable
-		// repository top, a helper location outside it, and an adapter that
-		// cannot resolve its own installed position.
+		// repository top, an adapter position whose repository is not the one
+		// the operation runs against (the prelude's test is an EQUALITY over
+		// two resolved tops, not a containment), and an adapter that cannot
+		// resolve its own installed position.
 		for (const [shape, matcher] of [
 			["unresolvable repository top", /repository top is unresolvable/i],
-			["helper location outside the repository top", /does not lie under the repository top/i],
+			[
+				"the adapter position's repository is not the operation's",
+				/is not the top of the repository the operation runs against/i,
+			],
 			["unresolvable installed position", /installed position is unresolvable/i],
 		] as const) {
 			assert.ok(

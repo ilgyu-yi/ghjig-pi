@@ -76,6 +76,7 @@
  */
 import { spawnSync } from "node:child_process";
 import {
+	accessSync,
 	closeSync,
 	constants,
 	fstatSync,
@@ -266,10 +267,15 @@ function gitAnswer(cwd: string, args: string[], absentStatus?: number): string |
  * `bound` is the SILENT state, so it is only reached where the adapters
  * would actually run: the resolved directory must lie under the resolved
  * top — both sides are realpath-ed before the compare, never the caller's
- * own cwd, which the caller supplies unresolved — and the three adapters
- * git executes must be present in it. Presence is read from the filesystem;
- * this classifier runs no program of the repository it classifies, so it
- * asks whether the adapters are there and never whether they run.
+ * own cwd, which the caller supplies unresolved — and each of the three
+ * adapters git executes must be a regular, non-empty file this account can
+ * execute. Those three questions are what arming rests on: git skips a hook
+ * file that is not executable, and runs an empty one as a no-op, so neither
+ * arms anything while both pass a presence probe. They are asked of the
+ * filesystem alone; this classifier runs no program of the repository it
+ * classifies, so it asks whether an adapter could run and never what it
+ * decides — an executable, non-empty adapter whose body decides nothing is
+ * `bound` here, and provenance is not asked at all.
  */
 const COMMITTED_ADAPTERS = ["pre-commit", "pre-push", "commit-msg"] as const;
 
@@ -278,7 +284,13 @@ export function computeBindState(cwd: string): BindState | undefined {
 	if (top === undefined || top === "") {
 		return undefined;
 	}
-	const configured = gitAnswer(cwd, ["config", "--get", "core.hooksPath"], 1);
+	// `--path` reads the value as git resolves it: a `~/`-spelled hooks path
+	// is expanded to the absolute path git honours, and a relative spelling is
+	// left as it is. Without it the join below turns `~/x` into `<top>/~/x`
+	// and an equivalent spelling of this clone's own adapters classifies
+	// `foreign-bound` — a degraded advisory every TTL window on a clone whose
+	// tier fires (§4.7's equivalent-spelling rule).
+	const configured = gitAnswer(cwd, ["config", "--path", "--get", "core.hooksPath"], 1);
 	if (configured === undefined) {
 		return undefined;
 	}
@@ -296,9 +308,12 @@ export function computeBindState(cwd: string): BindState | undefined {
 			return "foreign-bound";
 		}
 		for (const adapter of COMMITTED_ADAPTERS) {
-			if (!statSync(join(have, adapter)).isFile()) {
+			const adapterPath = join(have, adapter);
+			const adapterStat = statSync(adapterPath);
+			if (!adapterStat.isFile() || adapterStat.size === 0) {
 				return "foreign-bound";
 			}
+			accessSync(adapterPath, constants.X_OK);
 		}
 		return "bound";
 	} catch {

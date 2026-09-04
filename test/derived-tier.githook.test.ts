@@ -1033,6 +1033,33 @@ describe("the tier's locations derive from the adapters' installed position (iss
 		}
 	});
 
+	/**
+	 * The prelude self-locates with a `cd` over the argv git hands the
+	 * adapter — a relative operand with no `./` prefix, which is exactly the
+	 * operand shape `cd` resolves against CDPATH's entries before the cwd. So
+	 * one exported environment cell can move the derivation the whole tier
+	 * stands on, to a decoy tree the operation's repository never contained.
+	 * The fixture binds the way the instrument binds (relative `.githooks`),
+	 * because an absolute hooks path hands the adapter an absolute argv and
+	 * the shape is unreachable — the arm would measure nothing.
+	 */
+	it("a CDPATH naming a decoy tree does not move the tier's own derivation", () => {
+		const fixture = buildDerivedFixture();
+		const decoy = mkdtempSync(join(tmpdir(), "ghjig-cdpath-decoy-"));
+		try {
+			mkdirSync(join(decoy, ".githooks", "helpers"), { recursive: true });
+			assertFixtureArmed(fixture, "zqcdpathctl.txt", "CDPATH decoy");
+			stageFile(fixture, "zqcdpathleak.txt", `${AWS_SECRET}\n`);
+			const attempt = commitWithMessage(fixture, "chore: exercise the CDPATH derivation arm\n", {
+				env: { CDPATH: decoy },
+			});
+			assertSecretRefused(attempt, "zqcdpathleak.txt", "CDPATH decoy");
+		} finally {
+			rmSync(decoy, { recursive: true, force: true });
+			removeGithookFixture(fixture);
+		}
+	});
+
 	it("a disarmed secret scan says so on stderr, not only in the record", () => {
 		const repo = buildNestedRepo(".githooks");
 		try {

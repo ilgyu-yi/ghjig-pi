@@ -156,12 +156,20 @@ do_bind() {
   # what the adapters need to run: the directory it binds to must lie under
   # this repository (a `.githooks` link escaping the top resolves to a tree
   # the tier's own prelude refuses at commit time — see `_lib.sh`'s
-  # derivation), and the three adapters git will execute must be there. The
-  # containment test is the one `_lib.sh` states, in the same quoted-pattern
-  # form so a repository path carrying glob bytes is matched literally, and
-  # against the same physically resolved pair. Presence is asked of the file
-  # and nothing more: no reviewer measured a non-executable adapter, so the
-  # predicate stays on the shape that was measured.
+  # derivation), and each of the three adapters git will execute must be a
+  # regular file, non-empty, and executable by this account. The containment
+  # test below uses the same quoted-pattern form as the prelude, so a
+  # repository path carrying glob bytes is matched literally, and compares the
+  # same physically resolved pair — but the predicate is containment HERE and
+  # an equality THERE, because the two ask different questions: this one asks
+  # where the bound directory sits, the prelude asks whether the running
+  # adapter's own repository is the one the operation runs against. What the
+  # adapter test asks is ARMING, not
+  # provenance: git runs a hook file that is present and executable and skips
+  # one that is not, and an empty file runs as a no-op — so those three
+  # questions are the ones a claim about firing rests on. An executable,
+  # non-empty adapter whose body decides nothing still passes here, and
+  # whether these bytes are the repository's committed ones is not asked.
   case "$_bd_want/" in
     "$top"/*) ;;
     *)
@@ -170,13 +178,33 @@ do_bind() {
       ;;
   esac
   for _bd_adapter in pre-commit pre-push commit-msg; do
-    if [ ! -f "$_bd_want/$_bd_adapter" ]; then
-      warn "bind_local_tier.sh: the committed adapter '$_bd_adapter' is missing from the .githooks directory, so binding core.hooksPath there would arm nothing. This clone is NOT verified bound."
+    if [ ! -f "$_bd_want/$_bd_adapter" ] || [ ! -s "$_bd_want/$_bd_adapter" ] || [ ! -x "$_bd_want/$_bd_adapter" ]; then
+      warn "bind_local_tier.sh: the adapter '$_bd_adapter' in the .githooks directory is missing, empty, or not executable by this account, so binding core.hooksPath there would arm nothing. This clone is NOT verified bound. Restore the committed adapters (git checkout -- .githooks), then re-run: $RE_ARM"
       return 2
     fi
   done
-  _bd_hp="$(git config --local --get core.hooksPath </dev/null 2>/dev/null)" || _bd_hp=""
-  if [ -z "$_bd_hp" ]; then
+  # Two properties of this ONE read, both load-bearing.
+  #
+  # The EXIT STATUS is preserved, because it is the only thing that separates
+  # a key this clone does not carry (rc 1) from one it carries as the empty
+  # string (rc 0): git hands back the same empty value for both, so a
+  # discarded status makes the run overwrite a "no hooks" setting the
+  # operator chose - a value this clone carries, which §4.7 leaves to its
+  # target. Only rc 1 activates; rc 0 falls through to the compare below,
+  # where an empty value cannot equal the committed directory and takes the
+  # skip-with-warning path that already exists. Any other status also lands
+  # there: this read did not establish an absent key, and refusing without
+  # writing is the recoverable direction.
+  #
+  # `--path` makes the compare read what GIT reads: it expands a `~/`-spelled
+  # value to the absolute path git itself resolves core.hooksPath to, and
+  # leaves a relative spelling untouched, so an equivalent spelling of the
+  # committed adapters is the no-op §4.7 names rather than a foreign
+  # collision. It is used for RESOLUTION only - the operator-facing message
+  # below shows the raw spelling they typed.
+  _bd_hp="$(git config --local --path --get core.hooksPath </dev/null 2>/dev/null)"
+  _bd_hp_rc=$?
+  if [ "$_bd_hp_rc" -eq 1 ]; then
     git config --local core.hooksPath .githooks </dev/null || { warn 'bind_local_tier.sh: could not set core.hooksPath.'; return 2; }
     say "core.hooksPath: set to .githooks in this clone's own config (relative - resolves against each worktree top)."
   else
@@ -209,7 +237,26 @@ do_bind() {
       /*) ;;
       *) _bd_excl="$top/$_bd_excl" ;;
     esac
+    # This append is the same hazard the record writer in `_lib.sh` guards,
+    # so it asks the same questions in the same order, derived from the
+    # resolved path rather than spelled by hand: a link at the directory
+    # component this run may CREATE, a link at the leaf, and a leaf that
+    # exists as something other than a regular file. `mkdir -p` and `>>`
+    # alike follow a link, so either one would land the exclusion in a file
+    # the operator never named while this run reported success. Components
+    # ABOVE the one created here are not guarded: they are not this writer's
+    # to own, and a link planted there retargets the whole clone. An ABSENT
+    # exclude file is not a refusal - creating and appending it is the
+    # fallback's whole job.
     _bd_excl_dir="${_bd_excl%/*}"
+    if [ -L "$_bd_excl_dir" ] || [ -L "$_bd_excl" ] || { [ -e "$_bd_excl" ] && [ ! -f "$_bd_excl" ]; }; then
+      # Same rendering rule as the effective-value refusal below: the path is
+      # git's to supply and this line is a terminal's, so control bytes come
+      # out at the interpolation.
+      _bd_excl_shown="$(printf '%s' "$_bd_excl" | LC_ALL=C tr -d '\000-\037\177')"
+      warn "bind_local_tier.sh: the resolved info/exclude path '$_bd_excl_shown' is a symbolic link or not a regular file, so the exclusion was NOT written and this clone is NOT verified bound - an append there would land wherever that object points. Replace it with a regular file (or none), then re-run: $RE_ARM"
+      return 2
+    fi
     [ -d "$_bd_excl_dir" ] || (umask 077; mkdir -p "$_bd_excl_dir") || { warn 'bind_local_tier.sh: cannot create the info/exclude directory.'; return 2; }
     printf '%s\n' '/.ghjig/' >> "$_bd_excl" || { warn 'bind_local_tier.sh: could not append the exclusion line.'; return 2; }
     say 'exclusion: appended /.ghjig/ to the resolved info/exclude.'
@@ -221,7 +268,10 @@ do_bind() {
   # 1. The LOCAL scope must carry the activation: it is the persistent,
   #    per-clone state this run exists to leave, and a merged read alone
   #    would let an ambient value certify a write that never happened.
-  _bd_final_hp="$(git config --local --get core.hooksPath </dev/null 2>/dev/null)" || _bd_final_hp=""
+  #    Resolution reads the expanded value here too (the read above's note):
+  #    a spelling git expands must be compared as git expands it, or this
+  #    half refuses the very activation the branch above declared equivalent.
+  _bd_final_hp="$(git config --local --path --get core.hooksPath </dev/null 2>/dev/null)" || _bd_final_hp=""
   _bd_final="$(resolve_dir "$_bd_final_hp" "$top")"
   if [ -z "$_bd_final" ] || [ "$_bd_final" != "$_bd_want" ]; then
     warn "bind_local_tier.sh: verification failed - this clone's own core.hooksPath does not resolve to the committed .githooks directory. This clone is NOT verified bound."
@@ -239,8 +289,11 @@ do_bind() {
   #    name one, the message says so and prescribes the lookup instead of a
   #    scope it guessed (a named act that does not exist is worse than
   #    none).
+  #    The compare reads the expanded value and the message below reads the
+  #    raw one: what the operator has to clear is the spelling they typed.
+  _bd_eff_path="$(git config --path --get core.hooksPath </dev/null 2>/dev/null)" || _bd_eff_path=""
   _bd_eff_hp="$(git config --get core.hooksPath </dev/null 2>/dev/null)" || _bd_eff_hp=""
-  _bd_eff="$(resolve_dir "$_bd_eff_hp" "$top")"
+  _bd_eff="$(resolve_dir "$_bd_eff_path" "$top")"
   if [ -z "$_bd_eff" ] || [ "$_bd_eff" != "$_bd_want" ]; then
     _bd_eff_scope="$(git config --show-scope --get core.hooksPath </dev/null 2>/dev/null | head -n 1 | cut -f 1)" || _bd_eff_scope=""
     case "$_bd_eff_scope" in

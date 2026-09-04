@@ -51,9 +51,10 @@
 # scan proceeds with NO exclusions (it fails to excuse; it never approves
 # unmeasured). Suppression by a line that MATCHES is silent on every
 # surface, including a `*` line that excludes every staged path: the
-# machinery degradations above print because nobody chose them, and this is
-# a committed file the repository chose — a record per suppressed path would
-# be one per commit per path on any repository with a broad list.
+# machinery degradations above print because nobody chose them, and this
+# list is the operator's own working-tree choice, tracked or not — a record
+# per suppressed path would be one per commit per path on any repository
+# with a broad list.
 #
 # This file emits the CAUSE only; each calling surface appends the recovery
 # live at that surface (§3.11's arm-scoped remediation). Every git child
@@ -236,11 +237,11 @@ scan_staged_secrets() {
 	# Up-front pattern validation — machinery for the WHOLE run (§3.10's
 	# valid-AND-non-empty rule): any invalid row disarms before any path
 	# is scanned; a valid neighbour row never turns a partial scan.
+	# An unresolvable installed position leaves `_ss_home` empty and the
+	# pattern path `/secret-patterns`, which the next test disarms on as
+	# `pattern file absent or unreadable` — the same enumerated outcome, one
+	# less cause constant to keep in two artifacts and a test arm.
 	_ss_home="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || _ss_home=""
-	if [ -z "$_ss_home" ]; then
-		_ghjig_ss_disarm "rule source unresolvable from the helper's own installed position"
-		return 0
-	fi
 	_ss_pf="$_ss_home/secret-patterns"
 	if [ ! -f "$_ss_pf" ] || [ ! -r "$_ss_pf" ]; then
 		_ghjig_ss_disarm 'pattern file absent or unreadable'

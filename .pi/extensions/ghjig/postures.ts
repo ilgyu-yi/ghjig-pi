@@ -45,10 +45,18 @@ export const POSTURES: readonly PostureRow[] = [
 	{
 		dependency: "local-tier-derivation",
 		failureShape:
-			"the resolved helper location does not lie under the repository top the hook is running against (.githooks/_lib.sh's prelude)",
+			"the repository top discovered from the running adapter's own installed position is not the top of the repository the operation runs against (.githooks/_lib.sh's prelude)",
 		posture: "open",
 		justification:
-			"A tier that resolved its checks outside the repository it was invoked in would write its records there too, across the boundary §5.5 draws, so it runs no check and says so on stderr (§3.9's degradation-signal rule). No record is owed and none is written: the only sink this run could reach is the one the refusal exists to keep it out of.",
+			"A tier that resolved its checks outside the repository it was invoked in would write its records there too, across the boundary §5.5 draws, so it runs no check and says so on stderr (§3.9's degradation-signal rule). No record is owed and none is written: the only sink this run could reach is the one the refusal exists to keep it out of. The comparison binds the ADAPTER position alone: the helper directory is appended to that position afterwards and is neither resolved nor re-tested, so a `helpers` component linked out of the repository is sourced with no refusal — enumerated in place as a residual (§3.11), not closed here.",
+	},
+	{
+		dependency: "local-tier-derivation",
+		failureShape:
+			"no adapter runs at all — under the relative core.hooksPath the bind instrument writes, an operation git resolves against a caller-named work tree finds no hooks directory there (.githooks/bind_local_tier.sh's activation, measured through `GIT_WORK_TREE=<other dir> git commit`)",
+		posture: "open",
+		justification:
+			"Not a posture the tier chooses: no adapter is executed, so the prelude's refusal never runs and no surface of this tier speaks — measured, a staged pattern-matching key commits with zero bytes on either stream and no record. The three rows above all presuppose a running prelude, and none of them covers this shape. It is enumerated here rather than closed: the relative spelling is what lets a linked worktree arm itself from its own top, and no check that lives inside a hook can reach a shape in which no hook runs (SPEC §3.8's argv-invisible members, §3.11).",
 	},
 	{
 		dependency: "local-tier-derivation",
@@ -57,6 +65,14 @@ export const POSTURES: readonly PostureRow[] = [
 		posture: "open",
 		justification:
 			"Enforcement-chain degradation on §3.9's absent-dependency side: an adapter that cannot locate itself was never installed here in a form the tier can use, and the acting party cannot repair that from inside a block; the advice tier no-ops rather than wedging git (§3.2).",
+	},
+	{
+		dependency: "local-tier-exclusion",
+		failureShape:
+			"the resolved info/exclude path, or the directory component the run would create, is a symbolic link or an existing non-regular object (.githooks/bind_local_tier.sh's exclusion fallback)",
+		posture: "closed",
+		justification:
+			"`mkdir -p` and `>>` both follow a link, so the append would land wherever that object points while the run reported a verified bound state — the write-through-link refusal §5.5 binds on every record producer, asked here of the components this writer creates and not of the ones above them. The run refuses without writing and names the object and the remedy; its false-block cost is nil in the shape the fallback exists for (§3.6's obligation (i)) — an ABSENT exclude file is still created and appended.",
 	},
 	{
 		dependency: "commit-format-helper",
