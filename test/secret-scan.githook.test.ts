@@ -56,6 +56,7 @@ import {
 	type CommitAttempt,
 	commitWithMessage,
 	fixtureGit,
+	removeDelegatedHelpers,
 	type GithookFixture,
 	removeGithookFixture,
 } from "./harness/githook-fixture.ts";
@@ -135,7 +136,7 @@ function stageFile(fixture: GithookFixture, name: string, content: string | Buff
 	fixtureGit(fixture, ["add", "--", name]);
 }
 
-/** The fixture's copy of the committed pattern-file path (repo-root-relative read, §3.3). */
+/** The fixture's copy of the committed pattern-file path (read from the helper's own position, §3.3). */
 function fixturePatternsPath(fixture: GithookFixture): string {
 	return join(fixture.root, ".githooks", "helpers", "secret-patterns");
 }
@@ -511,7 +512,7 @@ describe("an unreadable allow-list never widens the excused set (issue #66, SPEC
 			stageFile(fixture, "zqallowed.txt", AWS_SECRET + "\n");
 			const attempt = commitWithMessage(fixture, "chore: exercise the unreadable allow-list arm\n");
 			assertSecretRefused(attempt, "aws-access-key-id", "zqallowed.txt", AWS_SECRET, "unreadable allow-list");
-			const warns = attempt.auditDelta.split("\n").filter((line) => /^warn\b/.test(line));
+			const warns = attempt.auditDelta.split("\n").filter((line) => /"action":"warn"/.test(line));
 			assert.equal(
 				warns.length,
 				1,
@@ -681,8 +682,8 @@ describe("a hostile-named path cannot split or forge a record (issue #66, SPEC �
 			for (const line of deltaLines) {
 				assert.match(
 					line,
-					/^(block|warn)\b/,
-					`hostile path: a record line does not start with its verb — a path byte split or forged ` +
+					/^\{"timestamp":"[^"]*","category":"[^"]*","action":"(block|warn)","text":"/,
+					`hostile path: a record line does not open a well-formed record — a path byte split or forged ` +
 						`a record: ${JSON.stringify(line)}`,
 				);
 			}
@@ -870,10 +871,8 @@ describe("boundary pins — green in both tree states (issue #66)", { skip: IS_W
 	});
 
 	it("helper file absent: the commit no-ops open, staged secret and protected HEAD included", () => {
-		const fixture = buildGithookFixture({
-			helpersRelative: "helpers-absent",
-			remote: { defaultBranch: PROTECTED },
-		});
+		const fixture = buildGithookFixture({ remote: { defaultBranch: PROTECTED } });
+		removeDelegatedHelpers(fixture);
 		try {
 			stageFile(fixture, "zqnoop1.txt", AWS_SECRET + "\n");
 			const attempt = commitWithMessage(fixture, "chore: exercise the absent-helper no-op\n");
@@ -899,10 +898,8 @@ describe("boundary pins — green in both tree states (issue #66)", { skip: IS_W
 		// identity, so the branch arm — whose helper is complete — must
 		// refuse this commit; a stale secret helper never folds the
 		// neighbour that already has everything it needs.
-		const fixture = buildGithookFixture({
-			helpersRelative: "helpers-stub",
-			remote: { defaultBranch: PROTECTED },
-		});
+		const fixture = buildGithookFixture({ remote: { defaultBranch: PROTECTED } });
+		removeDelegatedHelpers(fixture);
 		try {
 			cpSync(
 				join(repoRoot(), ".githooks", "helpers", "branch_guard.sh"),
@@ -937,10 +934,8 @@ describe("boundary pins — green in both tree states (issue #66)", { skip: IS_W
 		// is the require guard's own record: folding open from this arm on
 		// is the tier's contract, but a fold with ZERO records is not —
 		// §3.9's degradation-signal rule binds the require miss too.
-		const fixture = buildGithookFixture({
-			helpersRelative: "helpers-bguard-stub",
-			remote: { defaultBranch: PROTECTED },
-		});
+		const fixture = buildGithookFixture({ remote: { defaultBranch: PROTECTED } });
+		removeDelegatedHelpers(fixture);
 		try {
 			fixtureGit(fixture, ["checkout", "-q", "-b", FEATURE]);
 			writeFileSync(
@@ -966,7 +961,7 @@ describe("boundary pins — green in both tree states (issue #66)", { skip: IS_W
 				/\bblock\b/,
 				`stub branch helper: a degraded arm appended a block record; delta: ${JSON.stringify(attempt.auditDelta)}`,
 			);
-			const warns = attempt.auditDelta.split("\n").filter((line) => /^warn\b/.test(line));
+			const warns = attempt.auditDelta.split("\n").filter((line) => /"action":"warn"/.test(line));
 			assert.equal(
 				warns.length,
 				1,

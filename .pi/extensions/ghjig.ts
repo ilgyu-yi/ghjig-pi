@@ -18,6 +18,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendAuditRecord } from "./ghjig/audit.ts";
+import { maybeAdviseBindState } from "./ghjig/bind-state.ts";
 import { locateRepoRoot } from "./ghjig/locate.ts";
 import { resolveStateRoot } from "./ghjig/state-root.ts";
 
@@ -33,7 +34,10 @@ export default function ghjig(pi: ExtensionAPI) {
 	};
 
 	// Wrapped load marker: appendAuditRecord never throws; with no seam and
-	// no existing operational root this degrades open (nothing is created).
+	// no existing operational root the record itself creates nothing and
+	// degrades open. The bind advisory below is what first materializes the
+	// root, for its TTL stamp — so from a second session onward the record
+	// lands in a directory that session-start work, not this call, created.
 	// The paths are quoted and split across lines because a filesystem path
 	// may itself contain a quote or a newline: write-time encoding is what
 	// keeps this one record on one line (§5.5).
@@ -47,5 +51,9 @@ export default function ghjig(pi: ExtensionAPI) {
 	pi.on("session_start", () => {
 		record("session-start", "session_start received; appending the registration entry");
 		pi.appendEntry("ghjig-registration", { repoRoot, stateRoot, seamActive, auditWritable });
+		// Tier-2 bind advisory (§5.2, §5.9): classifies the clone the SESSION
+		// stands in from the configuration git resolves; debounced,
+		// timeout-bounded, and degrading to silence — never a session abort.
+		maybeAdviseBindState(pi, stateRoot);
 	});
 }

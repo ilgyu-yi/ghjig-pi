@@ -30,9 +30,8 @@
  *     `/.ghjig/` being git-ignored keeps out of the porcelain arm (§5.5 —
  *     the seam, never the operational sink). The
  *     assertion targets `.ghjig/state/` rather than all of `.ghjig/` because
- *     `.ghjig/` legitimately holds per-clone untracked binding state in a
- *     working clone (§4.1); the runtime's own sink is what must stay
- *     untouched.
+ *     `.ghjig/` legitimately holds per-clone untracked state in a working
+ *     clone (§4.1); the runtime's own sink is what must stay untouched.
  *   - polluted-ambient re-run: byte-identical resolution and zero writes
  *     into a decoy tree (§4.6), under a positive control that the decoy
  *     variables reached the child process — without it the block would pass
