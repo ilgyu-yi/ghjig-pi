@@ -1075,9 +1075,8 @@ describe("the tier's locations derive from the adapters' installed position (iss
 			assert.equal(
 				probe.stderr.includes("staged-secret scan not enforced"),
 				true,
-				`disarmed scan: the scan disarmed and printed nothing — every other machinery degradation in ` +
-					`this tier prints a line, so this allow reads exactly like an enforced pass (§3.9); ` +
-					`stderr: ${JSON.stringify(probe.stderr)}`,
+				`disarmed scan: the scan disarmed and printed nothing, so this allow is byte-identical on both ` +
+					`streams to an enforced pass (§3.9); stderr: ${JSON.stringify(probe.stderr)}`,
 			);
 		} finally {
 			rmSync(repo.tmp, { recursive: true, force: true });

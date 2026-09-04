@@ -56,7 +56,7 @@ export const POSTURES: readonly PostureRow[] = [
 			"no adapter runs at all — under the relative core.hooksPath the bind instrument writes, an operation git resolves against a caller-named work tree finds no hooks directory there (.githooks/bind_local_tier.sh's activation, measured through `GIT_WORK_TREE=<other dir> git commit`)",
 		posture: "open",
 		justification:
-			"Not a posture the tier chooses: no adapter is executed, so the prelude's refusal never runs and no surface of this tier speaks — measured, a staged pattern-matching key commits with zero bytes on either stream and no record. The three rows above all presuppose a running prelude, and none of them covers this shape. It is enumerated here rather than closed: the relative spelling is what lets a linked worktree arm itself from its own top, and no check that lives inside a hook can reach a shape in which no hook runs (SPEC §3.8's argv-invisible members, §3.11).",
+			"Not a posture the tier chooses: no adapter is executed, so the prelude's refusal never runs and no surface of this tier speaks — measured, a staged pattern-matching key commits with zero bytes on either stream and no record. No other row on this dependency covers this shape. It is enumerated here rather than closed: the relative spelling is what lets a linked worktree arm itself from its own top, and no check that lives inside a hook can reach a shape in which no hook runs (SPEC §3.8's argv-invisible members, §3.11).",
 	},
 	{
 		dependency: "local-tier-derivation",
@@ -65,6 +65,14 @@ export const POSTURES: readonly PostureRow[] = [
 		posture: "open",
 		justification:
 			"Enforcement-chain degradation on §3.9's absent-dependency side: an adapter that cannot locate itself was never installed here in a form the tier can use, and the acting party cannot repair that from inside a block; the advice tier no-ops rather than wedging git (§3.2).",
+	},
+	{
+		dependency: "local-tier-derivation",
+		failureShape:
+			"the prelude itself is absent — an adapter runs, but `.githooks/_lib.sh` is not beside it, so `githook_source` is undefined and every delegated arm folds (each of the three adapters sources it as its first executable statement)",
+		posture: "open",
+		justification:
+			"Enforcement-chain degradation on §3.9's absent-dependency side: absent means never installed here, which the acting party's git operation did not cause and cannot repair from inside a block. The rows above cannot reach this shape — every one of them is a decision taken INSIDE the prelude, which is the file that is missing. Measured on an armed clone with `_lib.sh` unlinked, committing a staged pattern-matching key under an invalid subject: the commit exits 0, both reach HEAD, the audit line count is unchanged, and the classifier answers `bound`, so session start is silent too; the only trace is the shell's own 'No such file or directory' on stderr, which is no surface of this tier. Enumerated rather than closed, and the residual is in place: this tier's record writer and every degradation line it prints live in the absent file, so a shell that failed to source it can emit neither, and the closure check the sibling rows rest on reads that file's INTERIOR and by construction cannot reach its absence.",
 	},
 	{
 		dependency: "local-tier-exclusion",
@@ -96,7 +104,7 @@ export const POSTURES: readonly PostureRow[] = [
 			"conventional_commit.sh present but its source does not complete — it exits while being sourced, fails to parse, or returns a non-zero status (githook_source's EXIT-trap fold and safe_source's non-zero-return record in .githooks/_lib.sh)",
 		posture: "open",
 		justification:
-			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; `exit` inside a sourced helper terminates the hook shell itself and would carry its status out to git, so the fold turns that into an allow for this arm and every arm after it (§3.2's arm ordering). The fold is not silent: one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). What the fold COVERS (§3.11) is a committed helper's own error path that ends in `exit` or in a non-zero return, with the tier's EXIT slot and its source-depth counter untouched and the shell alive — the terms it runs on, not exceptions to a wider claim, since a sourced file executes in the hook's own shell and can reach any of them. Outside those terms the outcome is not this tier's to decide and the fold's line and record may not run — measured on a sourced helper, `trap ':' EXIT; exit 5` refuses the commit and `trap 'exit 0' EXIT; exit 5` creates it, both with no tier bytes on either stream and no record — so in the allow direction this tier's surfaces carry exactly what an enforced pass carries.",
+			"Enforcement-chain degradation, same carve-out (§3.9): a source that does not hand control back cleanly is machinery, not the actor's input; `exit` inside a sourced helper terminates the hook shell itself and would carry its status out to git, so the fold turns that into an allow for this arm and every arm after it (§3.2's arm ordering). The fold is not silent: one stderr line plus exactly one warn record naming the helper (§3.9's degradation-signal rule). What the fold COVERS (§3.11) is a helper's own error path that ends in `exit` or in a non-zero return, with the tier's EXIT slot and its source-depth counter untouched and the shell alive — the terms it runs on, not exceptions to a wider claim, since a sourced file executes in the hook's own shell and can reach any of them. Outside those terms the outcome is not this tier's to decide and the fold's line and record may not run — measured on a sourced helper, `trap ':' EXIT; exit 5` refuses the commit and `trap 'exit 0' EXIT; exit 5` creates it, both with no tier bytes on either stream and no record — so in the allow direction this tier's surfaces carry exactly what an enforced pass carries.",
 	},
 	{
 		dependency: "commit-format-measurement",

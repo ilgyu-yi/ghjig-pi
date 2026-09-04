@@ -89,7 +89,7 @@ if [ -n "$_gh_top" ]; then
   _gh_top="$(cd "$_gh_top" 2>/dev/null && pwd -P)" || _gh_top=""
 fi
 if [ -z "$_gh_top" ] || [ "$_gh_top" != "$_gh_op_top" ]; then
-  printf '[dev-shell] local hook tier not enforced: these hooks are not committed in the repository this operation runs against, so this hook ran no check and wrote no record\n' >&2
+  printf '[dev-shell] local hook tier not enforced: the repository these hooks are committed in did not resolve to the one this operation runs against, so this hook ran no check and wrote no record\n' >&2
   exit 0
 fi
 GHJIG_SHELL_HELPERS="$_gh_here/helpers"
@@ -228,7 +228,7 @@ safe_source() {
 # source unguarded, and an `exit` there would carry its status to git — a
 # wedged hook with nothing printed.
 #
-# What the fold COVERS is a committed helper's own error path that ends in
+# What the fold COVERS is a helper's own error path that ends in
 # `exit` or in a non-zero return, with this tier's EXIT slot and the depth
 # counter below untouched and the shell still alive. Those are the terms it
 # runs on, not exceptions to a wider claim: a sourced file executes in THIS

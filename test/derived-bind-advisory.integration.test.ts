@@ -468,6 +468,88 @@ describe("the classifier does not report bound where the adapters would not run 
 		}
 	});
 
+	/**
+	 * The stored value carries a byte the classifier's read used to discard.
+	 * git escapes the newline into `.git/config`, hands it back inside the
+	 * value, and resolves `<top>/.githooks<LF>` — a path that does not exist,
+	 * under which no hook fires. A trimming read compares `<top>/.githooks`,
+	 * which git never resolved, and answers `bound`: the SILENT state, so
+	 * session start says nothing about a clone whose commits fire nothing.
+	 *
+	 * The byte travels as ARGV and is read back from a NUL-terminated `-z`
+	 * read — a shell capture or a trimming read strips the byte under test.
+	 */
+	it("a hooks path whose stored value ends in a newline is classified degraded", () => {
+		const root = boundRepo();
+		const home = join(root, "home");
+		const nlValue = `.githooks${String.fromCharCode(0x0a)}`;
+		try {
+			assert.equal(
+				computeBindState(root),
+				"bound",
+				"substrate: the unmutated clone did not classify bound, so the mutation below measures nothing",
+			);
+			runGit(root, home, ["config", "--local", "core.hooksPath", nlValue]);
+			const stored = spawnSync("git", ["config", "-z", "--local", "--path", "--get", "core.hooksPath"], {
+				cwd: root,
+				env: envFor(home),
+				timeout: 30_000,
+			});
+			assert.equal(
+				stored.stdout.toString("utf8"),
+				`${nlValue}\0`,
+				"substrate: git did not hand the value back with the byte under test, so this arm no longer " +
+					"measures the shape it names",
+			);
+			assert.equal(
+				computeBindState(root),
+				"foreign-bound",
+				"trailing newline: the classifier reported `bound` — the SILENT state — for a clone whose " +
+					"effective hooks path is a directory that does not exist, so no hook fires and no surface " +
+					"says so (§5.2)",
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	/**
+	 * git discriminates an absent key from one carried as the empty string by
+	 * the read's EXIT STATUS, and the two are different clones: under an empty
+	 * value git fires no hook and the operator carries a setting of their own,
+	 * while an absent key is a clone that was never armed. Collapsing them
+	 * makes the state token false for one of them, and the advisory that token
+	 * prints names a re-arm command that refuses on it.
+	 */
+	it("a hooks path carried as the empty string is classified degraded, while an absent key stays unbound", () => {
+		const root = boundRepo();
+		const home = join(root, "home");
+		try {
+			assert.equal(
+				computeBindState(root),
+				"bound",
+				"substrate: the unmutated clone did not classify bound, so the mutations below measure nothing",
+			);
+			runGit(root, home, ["config", "--local", "core.hooksPath", ""]);
+			assert.equal(
+				computeBindState(root),
+				"foreign-bound",
+				"empty local value: the classifier answered as if this clone carried no hooks path at all — git " +
+					"fires no hook under an empty value, and the `unbound` token's own advisory names a re-arm " +
+					"command that refuses on this clone (§5.2)",
+			);
+			runGit(root, home, ["config", "--local", "--unset", "core.hooksPath"]);
+			assert.equal(
+				computeBindState(root),
+				"unbound",
+				"absent key: a clone that carries no hooks path at all no longer classifies `unbound`, so the " +
+					"token that names a genuinely unarmed clone was moved (§5.2)",
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
 	it("a clone reached through a symlinked path is still classified bound", () => {
 		const root = boundRepo();
 		const link = `${root}-link`;

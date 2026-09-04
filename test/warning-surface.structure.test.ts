@@ -97,6 +97,12 @@ const SOURCES: readonly { file: string; allow: readonly string[] }[] = [
 			// escaped at its own leaf; escaping the carrier double-escapes.
 			"cause",
 			"recovery",
+			// The guarded object's own nouns. `GuardedObjectNouns` types both
+			// fields as CLOSED literal unions, so the set of bytes either
+			// expression can carry is enumerated in that declaration and holds
+			// no path component.
+			"nouns.noun",
+			"nouns.restoredBy",
 		],
 	},
 	{ file: "locate.ts", allow: [] },

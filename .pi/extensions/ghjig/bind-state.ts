@@ -23,12 +23,12 @@
  * keyed to the session cwd. The two coincide in every shipped shape (the
  * extension is loaded from the clone the session stands in).
  *
- * The module's own READ of the TTL stamp goes through `readGatedFile`:
- * lstat the path itself, require a plain regular file, refuse anything
- * past a size cap. The child timeout bounds only SPAWNED children, and
- * this process's own read has nothing to reap — a FIFO (or a symlink to
- * one) at a read path parks session start indefinitely, and a huge blob
- * allocates against it.
+ * The module's own READ of the TTL stamp goes through `readGatedFile`: open
+ * the path under `audit.ts`'s guard flags, then require a plain regular file
+ * inside a size cap OF THE DESCRIPTOR that open returned. The child timeout
+ * bounds only SPAWNED children, and this process's own read has nothing to
+ * reap — an unguarded open on a FIFO (or a symlink to one) at a read path
+ * parks session start indefinitely, and a huge blob allocates against it.
  *
  * The WRITE side is split by what each component can be. The DIRECTORY
  * components — the state root's container and the state root — are
@@ -95,13 +95,20 @@ import {
 	recoveryFor,
 	sinkRefusal,
 	STATE_FILE_MODE,
-	STATE_WRITE_GUARD_FLAGS,
+	STATE_PATH_GUARD_FLAGS,
 	writeRecordLine,
 } from "./audit.ts";
 import { quoted } from "./quote.ts";
 
 /** The TTL/debounce stamp's file name under the resolved state root (§5.9). */
 export const BIND_ADVISORY_STAMP_FILE = "bind-advisory-stamp.json";
+
+/**
+ * What the borrowed sink verdict calls THIS object. The verdict is shared
+ * with `audit.ts`'s appended sink; the stamp is one object rewritten whole,
+ * so nothing ever appends to it and the next session is what restores it.
+ */
+const STAMP_NOUNS = { noun: "TTL stamp", restoredBy: "the next session recreates the stamp" } as const;
 
 /** Advisory cadence: at most one compute per state root per hour. */
 export const BIND_ADVISORY_TTL_MS = 60 * 60 * 1000;
@@ -122,18 +129,25 @@ export const SMALL_READ_CAP_BYTES = 4_096;
 const STATE_DIR_MODE = 0o700;
 
 /**
- * The one read primitive of this module (header note): lstat the path
- * ITSELF, require a plain regular file inside `cap`, then read. Throws on
- * refusal — every call site sits inside a try/catch that degrades the
- * compute to silence, which is the same outcome an unreadable path
- * produces.
+ * The one read primitive of this module (header note): OPEN the path under
+ * the guard flags, then decide on the descriptor that open returned — a
+ * plain regular file inside `cap`. The decision binds the inode actually
+ * opened rather than whatever the name resolves to a second time, which is
+ * the same shape the stamp's writer forty lines below already takes. Throws
+ * on refusal — every call site sits inside a try/catch that degrades the
+ * compute to silence, which is the same outcome an unreadable path produces.
  */
 function readGatedFile(path: string, cap: number): Buffer {
-	const stat = lstatSync(path);
-	if (!stat.isFile() || stat.size > cap) {
-		throw new Error("ghjig: refused a session-start read path that is not a plain regular file inside its cap");
+	const fd = openSync(path, constants.O_RDONLY | STATE_PATH_GUARD_FLAGS);
+	try {
+		const stat = fstatSync(fd);
+		if (!stat.isFile() || stat.size > cap) {
+			throw new Error("ghjig: refused a session-start read path that is not a plain regular file inside its cap");
+		}
+		return readFileSync(fd);
+	} finally {
+		closeSync(fd);
 	}
-	return readFileSync(path);
 }
 
 /** The exact re-arm command every degraded-state advisory names (§5.2). */
@@ -226,12 +240,26 @@ function childEnv(): Record<string, string> {
 }
 
 /**
- * One timeout-bounded, constructed-environment `git` child. `undefined`
- * means the child failed, was killed, or exited non-zero for a reason
- * other than `absentStatus`; `""` means it exited with `absentStatus`,
- * which each caller reads as "this setting is not configured".
+ * One `git` child's outcome, discriminated: git separates a key it does not
+ * carry from one it carries as the empty string by the read's EXIT STATUS,
+ * and a single string return collapses the two. They are different clones —
+ * under an empty value git resolves an empty hooks path and fires nothing,
+ * while an absent key is a clone that was never armed — so the distinction
+ * git draws is carried rather than discarded.
  */
-function gitAnswer(cwd: string, args: string[], absentStatus?: number): string | undefined {
+type GitAnswer = { kind: "failed" } | { kind: "absent" } | { kind: "value"; value: string };
+
+/**
+ * One timeout-bounded, constructed-environment `git` child.
+ *
+ * The value is git's own output with exactly ONE trailing newline removed —
+ * git's terminator, and nothing beyond it. A `trim()` here would discard the
+ * bytes of the very value being classified: git stores and resolves a
+ * `core.hooksPath` ending in a newline, no hook fires under it, and a trimmed
+ * read compares a path git never resolved and answers `bound`, the silent
+ * state.
+ */
+function gitAnswer(cwd: string, args: string[], absentStatus?: number): GitAnswer {
 	const result = spawnSync("git", args, {
 		cwd,
 		env: childEnv(),
@@ -240,12 +268,13 @@ function gitAnswer(cwd: string, args: string[], absentStatus?: number): string |
 		stdio: ["ignore", "pipe", "ignore"],
 	});
 	if (result.error !== undefined || result.signal !== null) {
-		return undefined;
+		return { kind: "failed" };
 	}
 	if (result.status !== 0) {
-		return result.status === absentStatus ? "" : undefined;
+		return result.status === absentStatus ? { kind: "absent" } : { kind: "failed" };
 	}
-	return (result.stdout ?? Buffer.alloc(0)).toString("utf8").trim();
+	const out = (result.stdout ?? Buffer.alloc(0)).toString("utf8");
+	return { kind: "value", value: out.endsWith("\n") ? out.slice(0, -1) : out };
 }
 
 /**
@@ -254,15 +283,18 @@ function gitAnswer(cwd: string, args: string[], absentStatus?: number): string |
  * or a child that failed or was killed — and the caller must treat it as
  * silence WITHOUT a stamp.
  *
- * The hooks path is read MERGED (plain `--get`, every scope), because what
+ * The hooks path is read MERGED (`--path --get`, every scope), because what
  * fires is what git resolves; a classifier answering about a narrower
  * scope would describe a repository nobody is running (§4.7's scope split).
  * `git config --get` exits 1 on an unset key, which is the `unbound` state
- * and not a failed child. Both sides of the comparison are resolved
- * physically, so an equivalent spelling of the committed adapters is
- * `bound` and a path-prefix collision cannot mis-answer in either
- * direction (§4.6). An unresolvable side is not this repository's
- * committed adapters, which is exactly what `foreign-bound` says.
+ * and not a failed child. A key the clone DOES carry, as the empty string,
+ * exits 0 instead, and git fires no hook under it: that is a degraded clone
+ * carrying a setting, not an unarmed one, so it classifies `foreign-bound`.
+ * Both sides of the comparison are resolved physically, so an equivalent
+ * spelling of the committed adapters is `bound` and a path-prefix collision
+ * cannot mis-answer in either direction (§4.6). An unresolvable side is not
+ * this repository's committed adapters, which is exactly what
+ * `foreign-bound` says.
  *
  * `bound` is the SILENT state, so it is only reached where the adapters
  * would actually run: the resolved directory must lie under the resolved
@@ -280,22 +312,27 @@ function gitAnswer(cwd: string, args: string[], absentStatus?: number): string |
 const COMMITTED_ADAPTERS = ["pre-commit", "pre-push", "commit-msg"] as const;
 
 export function computeBindState(cwd: string): BindState | undefined {
-	const top = gitAnswer(cwd, ["rev-parse", "--show-toplevel"]);
-	if (top === undefined || top === "") {
+	const topAnswer = gitAnswer(cwd, ["rev-parse", "--show-toplevel"]);
+	if (topAnswer.kind !== "value" || topAnswer.value === "") {
 		return undefined;
 	}
+	const top = topAnswer.value;
 	// `--path` reads the value as git resolves it: a `~/`-spelled hooks path
 	// is expanded to the absolute path git honours, and a relative spelling is
 	// left as it is. Without it the join below turns `~/x` into `<top>/~/x`
 	// and an equivalent spelling of this clone's own adapters classifies
 	// `foreign-bound` — a degraded advisory every TTL window on a clone whose
 	// tier fires (§4.7's equivalent-spelling rule).
-	const configured = gitAnswer(cwd, ["config", "--path", "--get", "core.hooksPath"], 1);
-	if (configured === undefined) {
+	const answer = gitAnswer(cwd, ["config", "--path", "--get", "core.hooksPath"], 1);
+	if (answer.kind === "failed") {
 		return undefined;
 	}
-	if (configured === "") {
+	if (answer.kind === "absent") {
 		return "unbound";
+	}
+	const configured = answer.value;
+	if (configured === "") {
+		return "foreign-bound";
 	}
 	try {
 		const physicalTop = realpathSync(top);
@@ -414,7 +451,7 @@ export function maybeAdviseBindState(pi: Pick<ExtensionAPI, "appendEntry">, stat
 		try {
 			fd = openSync(
 				stampPath,
-				constants.O_WRONLY | constants.O_CREAT | STATE_WRITE_GUARD_FLAGS,
+				constants.O_WRONLY | constants.O_CREAT | STATE_PATH_GUARD_FLAGS,
 				STATE_FILE_MODE,
 			);
 		} catch (error) {
@@ -438,7 +475,7 @@ export function maybeAdviseBindState(pi: Pick<ExtensionAPI, "appendEntry">, stat
 			return;
 		}
 		try {
-			const refusal = sinkRefusal(fstatSync(fd), stampPath);
+			const refusal = sinkRefusal(fstatSync(fd), stampPath, STAMP_NOUNS);
 			if (refusal === undefined) {
 				ftruncateSync(fd, 0);
 				writeRecordLine(fd, `${JSON.stringify({ at: Date.now(), state })}\n`);

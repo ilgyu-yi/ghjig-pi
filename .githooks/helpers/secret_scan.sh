@@ -97,8 +97,7 @@ _ghjig_ss_sanitize_path() {
 
 # _ghjig_ss_disarm <reason-constant> — machinery degradation: exactly one
 # not-enforced warn record AND one stderr line for the run, then the caller
-# allows (§3.9). The line is what every other machinery degradation in this
-# tier prints, and without it this arm's allow is byte-identical on both
+# allows (§3.9). Without the line this arm's allow is byte-identical on both
 # streams to an enforced pass — the disarmed allow §3.9 forbids to read like
 # an enforced one. It stays one line for the run, not one per suppressed
 # path: the record already carries the reason, and the caller appends its

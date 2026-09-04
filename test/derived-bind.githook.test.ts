@@ -127,6 +127,22 @@ function gitOut(root: string, args: string[]): string {
 	return (result.stdout ?? Buffer.alloc(0)).toString("utf8").trim();
 }
 
+/**
+ * The stored value's own BYTES, read the way git hands them over: `-z`
+ * terminates with a NUL instead of a newline, so a value that itself ends in
+ * one is distinguishable from git's terminator. `gitOut` trims, which is the
+ * very discard the arms below are about, so those arms read through here.
+ */
+function gitValueBytes(root: string, args: string[]): Buffer {
+	const result = spawnSync("git", ["config", "-z", ...args], {
+		cwd: root,
+		env: constructedEnv(root),
+		timeout: 30_000,
+	});
+	const out = result.stdout ?? Buffer.alloc(0);
+	return out.length > 0 && out[out.length - 1] === 0 ? out.subarray(0, out.length - 1) : out;
+}
+
 /** The exclude file `git rev-parse --git-path info/exclude` resolves — never the literal `.git/info/exclude`. */
 function resolvedExcludePath(root: string): string {
 	const raw = gitOut(root, ["rev-parse", "--git-path", "info/exclude"]);
@@ -415,6 +431,125 @@ describe("a foreign hooks path is never overwritten (issue #68 AC3, SPEC §4.7)"
 				[],
 				`worktree scope: the refused run left state under .ghjig/ — a run that reports no verified bound ` +
 					`state leaves no per-clone artifact behind it (§4.7)`,
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The value compared is the value git resolves — every byte of it. git stores
+// a `core.hooksPath` ending in a newline and hands it back with that byte, so
+// the path it resolves is `<top>/.githooks<LF>`, which does not exist and
+// under which no hook fires. A capture that drops trailing newlines compares
+// `<top>/.githooks` instead — a path git never resolved — and reports the
+// clone verified.
+//
+// The byte under test travels to git as ARGV and is read back through
+// `gitValueBytes`: a `$(printf …)` spelling and a trimming read alike would
+// strip the very byte the arm exists to measure.
+// ---------------------------------------------------------------------------
+
+describe("the compare reads the bytes git resolves (issue #68 AC5, SPEC §4.7, §5.2)", { skip: IS_WINDOWS }, () => {
+	it("a local hooks path ending in a newline fires no hook, and the run refuses rather than reporting it bound", () => {
+		const fixture = buildFreshClone();
+		const NL_VALUE = `.githooks${cp(0x0a)}`;
+		try {
+			requireInstrument(fixture.root);
+
+			// Same-run control: armed by the ordinary spelling, THIS clone refuses
+			// the staged key, so the allow measured after the mutation is the
+			// mutation and not a dead fixture.
+			assertBindSucceeded(runBind(fixture.root), "trailing-newline control");
+			stageFile(fixture, "zqnlcontrol.txt", `${AWS_SECRET}\n`);
+			const armed = commitWithMessage(fixture, "chore: control commit under the armed chain\n");
+			assert.notEqual(
+				armed.status,
+				0,
+				`trailing newline control: the armed chain passed a staged key, so this fixture measures nothing; ` +
+					`stderr: ${JSON.stringify(armed.stderr)}`,
+			);
+			fixtureGit(fixture, ["reset", "-q", "--", "zqnlcontrol.txt"]);
+			rmSync(join(fixture.root, "zqnlcontrol.txt"), { force: true });
+
+			gitOut(fixture.root, ["config", "--local", "core.hooksPath", NL_VALUE]);
+			assert.deepEqual(
+				gitValueBytes(fixture.root, ["--local", "--path", "--get", "core.hooksPath"]),
+				Buffer.from(NL_VALUE, "utf8"),
+				"trailing newline: git did not hand the value back with the byte under test, so this arm no longer " +
+					"measures the shape it names",
+			);
+
+			// The shape's whole point: under this value git fires nothing.
+			stageFile(fixture, "zqnlprobe.txt", `${AWS_SECRET}\n`);
+			const under = commitWithMessage(fixture, "totally invalid subject for the grammar\n");
+			assert.equal(
+				under.status,
+				0,
+				`trailing newline: git refused the commit, so the value under test is not the dead one this arm ` +
+					`names; stderr: ${JSON.stringify(under.stderr)}`,
+			);
+
+			const run = runBind(fixture.root);
+			assertBindRefused(run, "trailing-newline local value");
+			assert.deepEqual(
+				gitValueBytes(fixture.root, ["--local", "--path", "--get", "core.hooksPath"]),
+				Buffer.from(NL_VALUE, "utf8"),
+				"trailing newline: the refused run rewrote a value another writer owns (§4.7)",
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The success line names TWO properties, so both are verified before it is
+// printed. The exclusion half is a write followed by no re-read: git's own
+// precedence lets a rule outside the resolved `info/exclude` decide the path,
+// and the line the run appends then changes nothing at all.
+// ---------------------------------------------------------------------------
+
+describe("the exclusion the success line claims is re-measured after the append (issue #68 AC4, SPEC §4.1)", { skip: IS_WINDOWS }, () => {
+	it("a rule that outranks the resolved info/exclude makes the run refuse instead of reporting a verified bound state", () => {
+		const fixture = buildFreshClone();
+		try {
+			requireInstrument(fixture.root);
+			writeFileSync(join(fixture.root, ".gitignore"), "!/.ghjig/\n");
+			fixtureGit(fixture, ["add", "--", ".gitignore"]);
+			fixtureGit(fixture, ["commit", "--no-verify", "-q", "-m", "chore: a rule outranking info/exclude"]);
+
+			// Same-run control: the fallback path really is the live one here, so
+			// the run below reaches the append this arm is about.
+			assert.equal(
+				spawnSync("git", ["check-ignore", "-q", "--", ".ghjig/state/audit.jsonl"], {
+					cwd: fixture.root,
+					env: constructedEnv(fixture.root),
+					timeout: 30_000,
+				}).status,
+				1,
+				"exclusion re-measure: the fixture already ignores .ghjig/, so the run takes the no-write fast path " +
+					"and this arm measures nothing",
+			);
+
+			const run = runBind(fixture.root);
+			assertBindRefused(run, "exclusion defeated by an outranking rule");
+			assert.equal(
+				run.output.includes("bound: verified"),
+				false,
+				`exclusion re-measure: the run reported a verified bound state while git still does not ignore ` +
+					`.ghjig/ — the success line names an exclusion that does not hold (§4.1): ${run.output}`,
+			);
+			assert.equal(
+				spawnSync("git", ["check-ignore", "-q", "--", ".ghjig/state/audit.jsonl"], {
+					cwd: fixture.root,
+					env: constructedEnv(fixture.root),
+					timeout: 30_000,
+				}).status,
+				1,
+				"exclusion re-measure: git now ignores the path, so the refusal above was about a shape that " +
+					"repaired itself and the arm measures nothing",
 			);
 		} finally {
 			removeGithookFixture(fixture);

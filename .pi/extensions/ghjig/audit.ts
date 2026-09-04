@@ -141,19 +141,20 @@ export const AUDIT_FILE_NAME = "audit.jsonl";
  * reader-less FIFO (see the header; both are inert on the regular files
  * that survive the verdict below).
  *
- * Exported because this sink is not the only file the runtime writes inside
+ * Exported because this sink is not the only file the runtime opens inside
  * the shell's own namespace: the bind advisory's TTL stamp
  * (`bind-state.ts`) opens with the same pair and holds its descriptor to
- * the same `sinkRefusal` verdict. The hazard is one hazard, so it has one
- * spelling — a second copy is a second thing to forget.
+ * the same `sinkRefusal` verdict, and that module's own read of the stamp
+ * carries them too. The hazard is one hazard, so it has one spelling — a
+ * second copy is a second thing to forget.
  */
-export const STATE_WRITE_GUARD_FLAGS = constants.O_NOFOLLOW | constants.O_NONBLOCK;
+export const STATE_PATH_GUARD_FLAGS = constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 /** Owner read/write only — any shell state file at rest (§5.5). */
 export const STATE_FILE_MODE = 0o600;
 
 /** Append-only, create-if-absent, and guarded as above. */
-const SINK_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | STATE_WRITE_GUARD_FLAGS;
+const SINK_FLAGS = constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | STATE_PATH_GUARD_FLAGS;
 
 /**
  * Writes `line` to an open descriptor and returns only when every byte of
@@ -180,6 +181,31 @@ export interface SinkRefusal {
 	cause: string;
 	recovery: string;
 }
+
+/**
+ * How the caller's object names itself in the two operator-facing clauses.
+ * The verdict is shared by two objects with different lives — this module's
+ * appended sink and the bind advisory's rewritten TTL stamp — and a clause
+ * that calls the stamp a sink, or tells the operator an append will restore
+ * a file nothing ever appends to, describes an object that is not there.
+ *
+ * Both fields are CLOSED literal unions rather than free strings: they are
+ * interpolated into the two clauses without escaping, and a closed set of
+ * spellings enumerated here is what makes "this expression carries no path"
+ * a fact a reader can check rather than a habit a caller can break (§3.10,
+ * issue #47).
+ */
+export interface GuardedObjectNouns {
+	/** The object as the cause names it. */
+	noun: "sink" | "TTL stamp";
+	/** What restores it once the path is clear, as the recovery names it. */
+	restoredBy: "the append recreates the sink" | "the next session recreates the stamp";
+}
+
+const SINK_NOUNS: GuardedObjectNouns = {
+	noun: "sink",
+	restoredBy: "the append recreates the sink",
+};
 
 /**
  * The verdict the open's `fstat` answer is held to (§4.6, §5.5 — see the
@@ -223,7 +249,11 @@ export interface SinkRefusal {
  * host's ACLs, and refusing every append there would move the row's
  * fail direction on a dimension no act on that host repairs.
  */
-export function sinkRefusal(stats: Stats, sinkPath: string): SinkRefusal | undefined {
+export function sinkRefusal(
+	stats: Stats,
+	sinkPath: string,
+	nouns: GuardedObjectNouns = SINK_NOUNS,
+): SinkRefusal | undefined {
 	const failed: string[] = [];
 	if (!stats.isFile()) {
 		failed.push("it is not a regular file");
@@ -243,11 +273,11 @@ export function sinkRefusal(stats: Stats, sinkPath: string): SinkRefusal | undef
 		return undefined;
 	}
 	return {
-		cause: `the sink at ${quoted(sinkPath)} was opened and refused before the write: ${failed.join("; ")}`,
+		cause: `the ${nouns.noun} at ${quoted(sinkPath)} was opened and refused before the write: ${failed.join("; ")}`,
 		recovery:
 			modeFailed && failed.length === 1
-				? `run \`chmod 600 ${quoted(sinkPath, "shell")}\`, then re-run — the record at rest is readable only by the account that writes it (§5.5).`
-				: `remove ${quoted(sinkPath, "shell")}, then re-run — the append recreates the sink as a plain 0600 file carrying exactly one name.`,
+				? `run \`chmod 600 ${quoted(sinkPath, "shell")}\`, then re-run — shell state at rest is readable only by the account that writes it (§5.5).`
+				: `remove ${quoted(sinkPath, "shell")}, then re-run — ${nouns.restoredBy} as a plain 0600 file carrying exactly one name.`,
 	};
 }
 
@@ -324,14 +354,14 @@ function componentKind(path: string): "directory" | "other" | "absent" {
  * then refused, so those codes arrive at this function by that path as
  * well as from the open. They are arms rather than enumerated residuals
  * because each has an act an operator can perform, and the general arm's
- * act — make the sink a plain writable file — is dead for all of them:
+ * act — make the path a plain writable file — is dead for all of them:
  * it is already one.
  *
  * The arms above are the modelled objects; every other code reaches the
  * general arm carrying its message. What decides whether that message is
  * honest is a RULE, stated here rather than a roster of the shapes it
  * generates, because the roster is what a later code silently falsifies
- * (§2.4, §3.11): the general arm's act — make the sink a plain,
+ * (§2.4, §3.11): the general arm's act — make the path a plain,
  * owner-writable file — is live exactly when the sink path is the object
  * that failed. Every unmodelled failure whose object lies elsewhere
  * carries a dead act, and what it delivers is the cause alone; the append
@@ -347,7 +377,7 @@ function componentKind(path: string): "directory" | "other" | "absent" {
 export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string): string {
 	const code = (error as { code?: string } | null)?.code;
 	if (code === "ENOENT") {
-		return `create the audit destination directory ${quoted(stateRoot)} (mkdir -p), then re-run.`;
+		return `create the state directory ${quoted(stateRoot)} (mkdir -p), then re-run.`;
 	}
 	if (code === "ENOTDIR") {
 		return (
@@ -366,15 +396,15 @@ export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string)
 	// message must not assert an absence it did not establish.
 	if (code === "EACCES" && !existsSync(sinkPath) && componentKind(stateRoot) === "directory") {
 		return (
-			`grant this account write and search permission on the audit destination directory ` +
-			`${quoted(stateRoot)} (chmod u+wx), then re-run — until its mode admits this account the sink there ` +
+			`grant this account write and search permission on the state directory ` +
+			`${quoted(stateRoot)} (chmod u+wx), then re-run — until its mode admits this account the file there ` +
 			`can be neither opened nor created, and cannot even be measured to say which.`
 		);
 	}
 	if (code === "ENOSPC" || code === "EDQUOT") {
 		return (
 			`free space on the filesystem holding ${quoted(sinkPath)}, or raise this account's quota on it, ` +
-			`then re-run — the record was refused for want of room, not for want of permission, ` +
+			`then re-run — the write was refused for want of room, not for want of permission, ` +
 			`so nothing at that path is misconfigured and no mode there admits it.`
 		);
 	}
@@ -382,19 +412,19 @@ export function recoveryFor(error: unknown, stateRoot: string, sinkPath: string)
 		return (
 			`remount the filesystem holding ${quoted(sinkPath)} read-write, or point the state root at a ` +
 			`writable filesystem, then re-run — while the mount refuses writes no permission or mode ` +
-			`at that path can admit the record.`
+			`at that path can admit the write.`
 		);
 	}
 	if (code === "EIO") {
 		return (
-			`no act at ${quoted(sinkPath)} restores this record: the write reached the filesystem and the ` +
-			`device or transport under it reported an error, so the record is lost. Restore the health ` +
-			`of that filesystem — for a network mount, its connection — then re-run to resume the trail.`
+			`no act at ${quoted(sinkPath)} restores this write: it reached the filesystem and the device or ` +
+			`transport under it reported an error, so what was being written is lost. Restore the health ` +
+			`of that filesystem — for a network mount, its connection — then re-run.`
 		);
 	}
 	return (
 		`make ${quoted(sinkPath)} a plain file writable by this account, then re-run — ` +
-		`a directory, a FIFO, a symlink, or another account's file at that path all refuse the append ` +
+		`a directory, a FIFO, a symlink, or another account's file at that path all refuse the write ` +
 		`(a symlink at that final component is refused rather than followed, and a reader-less FIFO raises ENXIO at ` +
 		`the open; a symlink at a PARENT is still followed — that ancestor policy belongs to the state-root seam (§5.5)).`
 	);
