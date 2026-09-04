@@ -2,8 +2,8 @@
 # .githooks/bind_local_tier.sh — the committed arming instrument for the
 # local git-hook tier (SPEC §3.2 arming path, §4.1, §4.6, §4.7).
 #
-# One documented run from anywhere inside a clone of this repository arms
-# the committed hook chain for THAT clone. The adapters derive their own
+# One documented run from the repository root of a clone of this repository
+# arms the committed hook chain for THAT clone. The adapters derive their own
 # runtime and their delegated checks from the committed tree, so arming is
 # the activation and nothing else:
 #
@@ -434,29 +434,16 @@ do_bind() {
     git check-ignore -q -- .ghjig/state/audit.jsonl </dev/null 2>/dev/null
     _bd_ci_rc=$?
     if [ "$_bd_ci_rc" -eq 1 ]; then
-      # The object is DERIVED, not guessed. Two different things put a path
-      # here and they take opposite acts: `git help check-ignore` --no-index -
-      # "Don't look in the index when undertaking the checks" - so the
-      # answers with and against the index separate a TRACKED path (which is
-      # never ignored whatever any pattern says, measured) from an ignore rule
-      # that outranks the file just written. `check-ignore -v` names neither:
-      # measured on both shapes that reach this arm, it prints nothing and
-      # exits 1, so prescribing it would be a lookup that answers nothing.
-      if git check-ignore -q --no-index -- .ghjig/state/audit.jsonl </dev/null 2>/dev/null; then
-        _bd_ci_fix="This clone TRACKS a path under .ghjig/ and git ignores no tracked path; untrack it (git rm -r --cached .ghjig)"
-      else
-        # `git help gitignore` orders the sources: a `.gitignore` in the work
-        # tree is read ahead of this file, and the index is already excluded
-        # above, so that is where the deciding rule is.
-        _bd_ci_fix="A .gitignore in this work tree is read ahead of that file, so the rule deciding .ghjig/ is in one of them; remove it"
-      fi
-      warn "bind_local_tier.sh: the exclusion line is present in '$_bd_excl_shown', but git still reports .ghjig/ as not ignored, so the shell's own state would be visible to version control here. This clone is NOT verified bound. $_bd_ci_fix, then re-run from the repository root: $RE_ARM"
+      # The message states the measured state and names no lookup: where this
+      # re-ask exits 1, `check-ignore -v` prints nothing, and `-v
+      # --non-matching` prints only the record `git help check-ignore`
+      # documents with "all fields ... except for <pathname> ... empty".
+      warn "bind_local_tier.sh: the exclusion line is present in '$_bd_excl_shown', but git still reports .ghjig/ as not ignored, so the shell's own state would be visible to version control here. This clone is NOT verified bound. Re-run from the repository root once git ignores that path: $RE_ARM"
       return 2
     fi
     # The success line names the exclusion only where this re-ask ANSWERED.
-    # `git help check-ignore` EXIT STATUS gives 0, 1 and 128; the last is "a
-    # fatal error was encountered", which is not evidence against this clone
-    # and so is not refused - but it is not a verification either.
+    # `git help check-ignore` documents a third exit status, 128; no suite run
+    # reaches it, and forcing this branch never taken leaves the suite green.
     if [ "$_bd_ci_rc" -ne 0 ]; then
       _bd_verified=' (core.hooksPath)'
     fi
