@@ -10,12 +10,12 @@
  *   - pins session storage to `<fixture>/sessions` via `--session-dir`,
  *   - isolates pi's own config (`HOME`, `PI_CODING_AGENT_DIR`) inside the
  *     fixture and disables startup network work (`PI_OFFLINE=1`),
- *   - sets the single test-only state seam `GHJIG_TEST_STATE_ROOT` to
+ *   - sets the single test-only state seam `GITJIG_TEST_STATE_ROOT` to
  *     `<fixture>/state` (§5.5 disposable-root carve-out), replaceable only
  *     through the explicit `seamOverride` option and never through `env`.
  *
- * The ghjig runtime under test is linked from THIS repository's tree
- * (`.pi/extensions/ghjig.ts` + `.pi/extensions/ghjig/`) into the fixture,
+ * The gitjig runtime under test is linked from THIS repository's tree
+ * (`.pi/extensions/gitjig.ts` + `.pi/extensions/gitjig/`) into the fixture,
  * so the suite exercises the committed bytes, not a copy.
  *
  * Invocation contract: run the suites as `node --test "test/*.test.ts"`.
@@ -48,8 +48,8 @@ export type ScriptTurn =
 export interface FixtureOptions {
 	/** Deterministic provider turns, written to `<fixture>/script.json`. */
 	script: ScriptTurn[];
-	/** Symlink this repository's `.pi/extensions/ghjig.ts` and `.pi/extensions/ghjig/` into the fixture. */
-	linkGhjigRuntime?: boolean;
+	/** Symlink this repository's `.pi/extensions/gitjig.ts` and `.pi/extensions/gitjig/` into the fixture. */
+	linkGitjigRuntime?: boolean;
 	/** Extra extension files to write, keyed by path relative to `<fixture>/.pi/extensions/`. */
 	extensionFiles?: Record<string, string>;
 	/** Extra extension symlinks to create, keyed by name relative to `<fixture>/.pi/extensions/`, value = absolute target. */
@@ -64,7 +64,7 @@ export interface Fixture {
 	stateDir: string;
 	homeDir: string;
 	piAgentDir: string;
-	/** Where the ghjig audit primitive is expected to write under the seam. */
+	/** Where the gitjig audit primitive is expected to write under the seam. */
 	auditFile: string;
 }
 
@@ -73,7 +73,7 @@ export interface RunOptions {
 	/**
 	 * Extra environment for the pi process (e.g. decoy variables). Overrides
 	 * every variable of the hermetic base EXCEPT the state seam
-	 * `GHJIG_TEST_STATE_ROOT` — see `seamOverride`.
+	 * `GITJIG_TEST_STATE_ROOT` — see `seamOverride`.
 	 */
 	env?: Record<string, string>;
 	/**
@@ -121,7 +121,7 @@ export function isLoadTimeActionFailure(result: PiRunResult): boolean {
 }
 
 export function buildFixture(options: FixtureOptions): Fixture {
-	const root = mkdtempSync(join(tmpdir(), "ghjig-fixture-"));
+	const root = mkdtempSync(join(tmpdir(), "gitjig-fixture-"));
 	const extensionsDir = join(root, ".pi", "extensions");
 	const sessionsDir = join(root, "sessions");
 	const stateDir = join(root, "state");
@@ -139,13 +139,13 @@ export function buildFixture(options: FixtureOptions): Fixture {
 	);
 	writeFileSync(join(root, "script.json"), `${JSON.stringify(options.script, null, "\t")}\n`);
 
-	if (options.linkGhjigRuntime) {
+	if (options.linkGitjigRuntime) {
 		// Fixture construction never verifies the link targets: a dangling
 		// symlink is legal here by design. Whether the runtime is present is
 		// measured by the suite's evidence assertions, never by the builder —
 		// the harness lays out the shape, the assertions read the result.
-		symlinkSync(join(repoRoot(), ".pi", "extensions", "ghjig.ts"), join(extensionsDir, "ghjig.ts"), "file");
-		symlinkSync(join(repoRoot(), ".pi", "extensions", "ghjig"), join(extensionsDir, "ghjig"), "dir");
+		symlinkSync(join(repoRoot(), ".pi", "extensions", "gitjig.ts"), join(extensionsDir, "gitjig.ts"), "file");
+		symlinkSync(join(repoRoot(), ".pi", "extensions", "gitjig"), join(extensionsDir, "gitjig"), "dir");
 	}
 
 	for (const [relPath, content] of Object.entries(options.extensionFiles ?? {})) {
@@ -194,7 +194,7 @@ export function runPi(fixture: Fixture, options: RunOptions = {}): Promise<PiRun
 		// Bound AFTER the spread: `env` overrides everything else, but the one
 		// variable that keeps this run off the operational state root is
 		// reachable only through the explicit `seamOverride` opt-in (§4.6, §5.5).
-		GHJIG_TEST_STATE_ROOT: options.seamOverride ?? fixture.stateDir,
+		GITJIG_TEST_STATE_ROOT: options.seamOverride ?? fixture.stateDir,
 	};
 	return new Promise((resolvePromise) => {
 		// stdio[0] = "ignore" attaches /dev/null: the explicit end-of-input

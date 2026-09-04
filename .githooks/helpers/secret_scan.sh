@@ -17,7 +17,7 @@
 # addressed with a `:(literal)` pathspec; content read config-neutrally
 # (`--no-ext-diff --no-textconv --no-color -U0`) and env-neutrally (the
 # pathspec-magic env family is unset around every git-diff child — see
-# _ghjig_ss_git_diff); added lines identified
+# _gitjig_ss_git_diff); added lines identified
 # structurally from the diff's own hunk shape (a content line beginning
 # `++` is content, not a header). Binary is keyed by the numstat
 # no-line-counts outcome, never a prose message (§3.10). The first commit
@@ -60,16 +60,16 @@
 # live at that surface (§3.11's arm-scoped remediation). Every git child
 # reads stdin from /dev/null (the adapter loop precedent). Fail-direction
 # bookkeeping lives in the one inventory at
-# `.pi/extensions/ghjig/postures.ts`, never re-decided here.
+# `.pi/extensions/gitjig/postures.ts`, never re-decided here.
 #
 # Env-trust note (the branch_guard.sh `unset -v` precedent): this file
-# keeps NO file-scope `_GHJIG_SS_*` state — every variable below is
+# keeps NO file-scope `_GITJIG_SS_*` state — every variable below is
 # function-local, so there is no inherited cell for a caller's environment
 # to pre-seed and nothing to discard at source time.
 
-# _ghjig_ss_sanitize_path <raw-path> — print the percent-encoded rendering
+# _gitjig_ss_sanitize_path <raw-path> — print the percent-encoded rendering
 # (C-locale byte loop; printable ASCII except '%' passes through).
-_ghjig_ss_sanitize_path() {
+_gitjig_ss_sanitize_path() {
 	local LC_ALL=C
 	local _ss_in="$1" _ss_out='' _ss_i=0 _ss_len _ss_ch _ss_ord
 	_ss_len=${#_ss_in}
@@ -95,14 +95,14 @@ _ghjig_ss_sanitize_path() {
 	printf '%s\n' "$_ss_out"
 }
 
-# _ghjig_ss_disarm <reason-constant> — machinery degradation: exactly one
+# _gitjig_ss_disarm <reason-constant> — machinery degradation: exactly one
 # not-enforced warn record AND one stderr line for the run, then the caller
 # allows (§3.9). Without the line this arm's allow is byte-identical on both
 # streams to an enforced pass — the disarmed allow §3.9 forbids to read like
 # an enforced one. It stays one line for the run, not one per suppressed
 # path: the record already carries the reason, and the caller appends its
 # own recovery.
-_ghjig_ss_disarm() {
+_gitjig_ss_disarm() {
 	printf '%s\n' "[dev-shell] staged-secret scan not enforced: $1 - this commit was not scanned" >&2
 	if command -v audit_log >/dev/null 2>&1; then
 		( audit_log warn secret not-enforced "staged-secret scan not enforced: $1" ) </dev/null >/dev/null 2>&1 || true
@@ -110,11 +110,11 @@ _ghjig_ss_disarm() {
 	return 0
 }
 
-# _ghjig_ss_refuse_match <pattern-id> <raw-path> — pattern-match refusal:
+# _gitjig_ss_refuse_match <pattern-id> <raw-path> — pattern-match refusal:
 # pattern ID + sanitized path on both surfaces, never the matched bytes.
-_ghjig_ss_refuse_match() {
+_gitjig_ss_refuse_match() {
 	local _ss_id="$1" _ss_sp
-	_ss_sp="$(_ghjig_ss_sanitize_path "$2")"
+	_ss_sp="$(_gitjig_ss_sanitize_path "$2")"
 	printf '%s\n' "secret-scan: pattern '${_ss_id}' matched in staged path '${_ss_sp}' — refusing the commit" >&2
 	if command -v audit_log >/dev/null 2>&1; then
 		( audit_log block secret blocked "secret-scan: pattern '${_ss_id}' matched in staged path '${_ss_sp}'" ) </dev/null >/dev/null 2>&1 || true
@@ -122,11 +122,11 @@ _ghjig_ss_refuse_match() {
 	return 1
 }
 
-# _ghjig_ss_refuse_unmeasurable <raw-path> — the unmeasurable-input arm
+# _gitjig_ss_refuse_unmeasurable <raw-path> — the unmeasurable-input arm
 # (§3.9's measurement rule): its own cause, no pattern ID, content-free.
-_ghjig_ss_refuse_unmeasurable() {
+_gitjig_ss_refuse_unmeasurable() {
 	local _ss_sp
-	_ss_sp="$(_ghjig_ss_sanitize_path "$1")"
+	_ss_sp="$(_gitjig_ss_sanitize_path "$1")"
 	printf '%s\n' "secret-scan: staged path '${_ss_sp}' has unmeasurable added content — refusing the commit" >&2
 	if command -v audit_log >/dev/null 2>&1; then
 		( audit_log block secret blocked "secret-scan: unmeasurable added content at staged path '${_ss_sp}'" ) </dev/null >/dev/null 2>&1 || true
@@ -134,7 +134,7 @@ _ghjig_ss_refuse_unmeasurable() {
 	return 1
 }
 
-# _ghjig_ss_git_diff <args…> — every staged-diff read goes through here:
+# _gitjig_ss_git_diff <args…> — every staged-diff read goes through here:
 # the pathspec-magic env family is neutralized for the child, because an
 # inherited GIT_*_PATHSPECS cell rewrites how the `:(literal)` pathspec
 # (and the enumeration it must agree with) is parsed — the measured object
@@ -143,7 +143,7 @@ _ghjig_ss_refuse_unmeasurable() {
 # the same ground: a local refs/replace ref resolves HEAD to a graft of
 # the actor's choosing, and a graft carrying the staged bytes empties the
 # measured diff. Subshell form, bash-3.2-safe.
-_ghjig_ss_git_diff() {
+_gitjig_ss_git_diff() {
 	(
 		unset GIT_LITERAL_PATHSPECS GIT_GLOB_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_ICASE_PATHSPECS
 		GIT_NO_REPLACE_OBJECTS=1
@@ -152,14 +152,14 @@ _ghjig_ss_git_diff() {
 	)
 }
 
-# _ghjig_ss_scan_path <raw-path> — scan one staged path's added lines.
+# _gitjig_ss_scan_path <raw-path> — scan one staged path's added lines.
 # Reads the caller's _ss_base/_ss_n/_ss_ids/_ss_eres via dynamic scope.
 # Returns 0 (clean) or 1 (refused; the record is already emitted).
-_ghjig_ss_scan_path() {
+_gitjig_ss_scan_path() {
 	local _ss_p="$1"
 	local _ss_num _ss_first _ss_add _ss_rest _ss_del
-	if ! _ss_num="$(_ghjig_ss_git_diff --cached --no-ext-diff --no-textconv --no-color --numstat "$_ss_base" -- ":(literal)$_ss_p" 2>/dev/null </dev/null)"; then
-		_ghjig_ss_refuse_unmeasurable "$_ss_p"
+	if ! _ss_num="$(_gitjig_ss_git_diff --cached --no-ext-diff --no-textconv --no-color --numstat "$_ss_base" -- ":(literal)$_ss_p" 2>/dev/null </dev/null)"; then
+		_gitjig_ss_refuse_unmeasurable "$_ss_p"
 		return 1
 	fi
 	if [ -z "$_ss_num" ]; then
@@ -167,7 +167,7 @@ _ghjig_ss_scan_path() {
 		# numstat is a measurement the scan did not get — never evidence of
 		# no change. Vouching here would approve unmeasured (§3.9): any
 		# interference between the two reads lands as a loud refusal.
-		_ghjig_ss_refuse_unmeasurable "$_ss_p"
+		_gitjig_ss_refuse_unmeasurable "$_ss_p"
 		return 1
 	fi
 	# Binary is the numstat no-line-counts outcome: "-<TAB>-<TAB>..." (§3.10).
@@ -176,12 +176,12 @@ _ghjig_ss_scan_path() {
 	_ss_rest="${_ss_first#*$'\t'}"
 	_ss_del="${_ss_rest%%$'\t'*}"
 	if [ "$_ss_add" = "-" ] && [ "$_ss_del" = "-" ]; then
-		_ghjig_ss_refuse_unmeasurable "$_ss_p"
+		_gitjig_ss_refuse_unmeasurable "$_ss_p"
 		return 1
 	fi
 	local _ss_diff
-	if ! _ss_diff="$(_ghjig_ss_git_diff --cached --no-ext-diff --no-textconv --no-color -U0 "$_ss_base" -- ":(literal)$_ss_p" 2>/dev/null </dev/null)"; then
-		_ghjig_ss_refuse_unmeasurable "$_ss_p"
+	if ! _ss_diff="$(_gitjig_ss_git_diff --cached --no-ext-diff --no-textconv --no-color -U0 "$_ss_base" -- ":(literal)$_ss_p" 2>/dev/null </dev/null)"; then
+		_gitjig_ss_refuse_unmeasurable "$_ss_p"
 		return 1
 	fi
 	# Structural hunk parse: only lines after a hunk header are body lines,
@@ -206,12 +206,12 @@ _ghjig_ss_scan_path() {
 			[[ "$_ss_added" =~ ${_ss_eres[$_ss_i]} ]]
 			_ss_rc=$?
 			if [ "$_ss_rc" -eq 0 ]; then
-				_ghjig_ss_refuse_match "${_ss_ids[$_ss_i]}" "$_ss_p"
+				_gitjig_ss_refuse_match "${_ss_ids[$_ss_i]}" "$_ss_p"
 				return 1
 			elif [ "$_ss_rc" -ne 1 ]; then
 				# A matcher failure at scan time over one input is the
 				# input side of the timing split (§3.3), never a disarm.
-				_ghjig_ss_refuse_unmeasurable "$_ss_p"
+				_gitjig_ss_refuse_unmeasurable "$_ss_p"
 				return 1
 			fi
 			_ss_i=$((_ss_i + 1))
@@ -229,7 +229,7 @@ scan_staged_secrets() {
 	local _ss_top _ss_pf _ss_home
 	_ss_top="$(git rev-parse --show-toplevel 2>/dev/null </dev/null)" || _ss_top=""
 	if [ -z "$_ss_top" ]; then
-		_ghjig_ss_disarm 'repository toplevel unresolvable'
+		_gitjig_ss_disarm 'repository toplevel unresolvable'
 		return 0
 	fi
 
@@ -243,7 +243,7 @@ scan_staged_secrets() {
 	_ss_home="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || _ss_home=""
 	_ss_pf="$_ss_home/secret-patterns"
 	if [ ! -f "$_ss_pf" ] || [ ! -r "$_ss_pf" ]; then
-		_ghjig_ss_disarm 'pattern file absent or unreadable'
+		_gitjig_ss_disarm 'pattern file absent or unreadable'
 		return 0
 	fi
 	local _ss_ids _ss_eres
@@ -288,11 +288,11 @@ scan_staged_secrets() {
 		_ss_n=$((_ss_n + 1))
 	done <"$_ss_pf"
 	if [ "$_ss_bad" -ne 0 ]; then
-		_ghjig_ss_disarm 'pattern file failed up-front validation'
+		_gitjig_ss_disarm 'pattern file failed up-front validation'
 		return 0
 	fi
 	if [ "$_ss_n" -eq 0 ]; then
-		_ghjig_ss_disarm 'pattern set empty after stripping comments and blanks'
+		_gitjig_ss_disarm 'pattern set empty after stripping comments and blanks'
 		return 0
 	fi
 
@@ -304,7 +304,7 @@ scan_staged_secrets() {
 	else
 		_ss_base="$(git hash-object -t tree /dev/null 2>/dev/null </dev/null)" || _ss_base=""
 		if [ -z "$_ss_base" ]; then
-			_ghjig_ss_disarm 'staged-diff base unresolvable'
+			_gitjig_ss_disarm 'staged-diff base unresolvable'
 			return 0
 		fi
 	fi
@@ -323,18 +323,18 @@ scan_staged_secrets() {
 	_ss_gd="$(git rev-parse --git-dir 2>/dev/null </dev/null)" || _ss_gd=""
 	_ss_list=""
 	if [ -n "$_ss_gd" ] && [ -d "$_ss_gd" ]; then
-		_ss_list="$(mktemp "$_ss_gd/ghjig-secret-scan.XXXXXX" 2>/dev/null </dev/null)" || _ss_list=""
+		_ss_list="$(mktemp "$_ss_gd/gitjig-secret-scan.XXXXXX" 2>/dev/null </dev/null)" || _ss_list=""
 	fi
 	if [ -z "$_ss_list" ]; then
-		_ss_list="$(mktemp "${TMPDIR:-/tmp}/ghjig-secret-scan.XXXXXX" 2>/dev/null </dev/null)" || _ss_list=""
+		_ss_list="$(mktemp "${TMPDIR:-/tmp}/gitjig-secret-scan.XXXXXX" 2>/dev/null </dev/null)" || _ss_list=""
 	fi
 	if [ -z "$_ss_list" ]; then
-		_ghjig_ss_disarm 'staged-path enumeration spool unavailable'
+		_gitjig_ss_disarm 'staged-path enumeration spool unavailable'
 		return 0
 	fi
-	if ! _ghjig_ss_git_diff --cached --name-only -z "$_ss_base" -- >"$_ss_list" 2>/dev/null </dev/null; then
+	if ! _gitjig_ss_git_diff --cached --name-only -z "$_ss_base" -- >"$_ss_list" 2>/dev/null </dev/null; then
 		rm -f -- "$_ss_list"
-		_ghjig_ss_disarm 'staged path enumeration failed'
+		_gitjig_ss_disarm 'staged path enumeration failed'
 		return 0
 	fi
 
@@ -374,7 +374,7 @@ scan_staged_secrets() {
 			_ss_e=$((_ss_e + 1))
 		done
 		if [ "$_ss_skip" -eq 0 ]; then
-			if ! _ghjig_ss_scan_path "$_ss_path"; then
+			if ! _gitjig_ss_scan_path "$_ss_path"; then
 				_ss_verdict=1
 				break
 			fi

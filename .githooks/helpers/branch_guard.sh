@@ -44,17 +44,17 @@
 # Fail direction bookkeeping: the two refusals below are the LIVE predicate
 # refusing the actor's own input (§3.9's measurement rule). Degradation of
 # the chain around this file — binding, helper file, delegated function,
-# derivation — is inventoried at `.pi/extensions/ghjig/postures.ts`, never
+# derivation — is inventoried at `.pi/extensions/gitjig/postures.ts`, never
 # re-decided here. Every git call reads stdin from /dev/null: the pre-push
 # adapter's while-read loop over stdin is load-bearing, and a child that
 # gulps stdin would silently starve it.
 
 # The derivation cache is process state, never inherited state: git hands
-# the pusher's environment to hooks, so an exported _GHJIG_BG_* pair could
+# the pusher's environment to hooks, so an exported _GITJIG_BG_* pair could
 # otherwise pre-seed the verdict (a traceless disarm, a decoy identity, or
 # a set -u abort). Sourcing precedes every call, so discarding inherited
 # values here preserves the per-invocation cache while closing the seed.
-unset -v _GHJIG_BG_STATE _GHJIG_BG_P
+unset -v _GITJIG_BG_STATE _GITJIG_BG_P
 
 # current_branch — total function (§3.9): prints the valid short branch
 # name, or prints nothing and fails on a detached HEAD — no consumer reads
@@ -67,15 +67,15 @@ current_branch() {
 	return 0
 }
 
-# _ghjig_bg_fold <bytes> — ASCII-only case fold under byte semantics.
-_ghjig_bg_fold() {
+# _gitjig_bg_fold <bytes> — ASCII-only case fold under byte semantics.
+_gitjig_bg_fold() {
 	printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z'
 }
 
-# _ghjig_bg_derive — derive and cache P. Returns 0 with _GHJIG_BG_P set
+# _gitjig_bg_derive — derive and cache P. Returns 0 with _GITJIG_BG_P set
 # (armed), or non-zero (disarmed; the one warn record already emitted).
-_ghjig_bg_derive() {
-	case "${_GHJIG_BG_STATE:-}" in
+_gitjig_bg_derive() {
+	case "${_GITJIG_BG_STATE:-}" in
 	armed) return 0 ;;
 	disarmed) return 1 ;;
 	esac
@@ -83,8 +83,8 @@ _ghjig_bg_derive() {
 	local _bg_ref
 	if _bg_ref="$(git symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null </dev/null)" &&
 		[ -n "$_bg_ref" ] && [ "$_bg_ref" != "${_bg_ref#refs/remotes/origin/}" ]; then
-		_GHJIG_BG_P="${_bg_ref#refs/remotes/origin/}"
-		_GHJIG_BG_STATE=armed
+		_GITJIG_BG_P="${_bg_ref#refs/remotes/origin/}"
+		_GITJIG_BG_STATE=armed
 		return 0
 	fi
 
@@ -100,8 +100,8 @@ _ghjig_bg_derive() {
 				case "$_bg_p" in
 				'' | *$'\t'*) ;; # unparseable — fall through to disarmed
 				*)
-					_GHJIG_BG_P="$_bg_p"
-					_GHJIG_BG_STATE=armed
+					_GITJIG_BG_P="$_bg_p"
+					_GITJIG_BG_STATE=armed
 					return 0
 					;;
 				esac
@@ -110,7 +110,7 @@ _ghjig_bg_derive() {
 		fi
 	fi
 
-	_GHJIG_BG_STATE=disarmed
+	_GITJIG_BG_STATE=disarmed
 	if command -v audit_log >/dev/null 2>&1; then
 		( audit_log warn branch not-enforced 'protected-branch gate not enforced: protected identity underivable (both derivation stages failed)' ) </dev/null >/dev/null 2>&1 || true
 	fi
@@ -120,13 +120,13 @@ _ghjig_bg_derive() {
 # is_protected_branch <name> — 0 iff the caller must refuse the target.
 is_protected_branch() {
 	local _bg_target="${1-}"
-	_ghjig_bg_derive || return 1
+	_gitjig_bg_derive || return 1
 
-	if [ "$_bg_target" = "$_GHJIG_BG_P" ]; then
+	if [ "$_bg_target" = "$_GITJIG_BG_P" ]; then
 		printf '%s\n' 'protected-branch: the target is the derived protected identity — refusing' >&2
 		return 0
 	fi
-	if [ "$(_ghjig_bg_fold "$_bg_target")" = "$(_ghjig_bg_fold "$_GHJIG_BG_P")" ]; then
+	if [ "$(_gitjig_bg_fold "$_bg_target")" = "$(_gitjig_bg_fold "$_GITJIG_BG_P")" ]; then
 		printf '%s\n' 'protected-branch: the target is ASCII-case-fold-equal to the derived protected identity and the destination ref cannot be verified client-side — ambiguous, refusing' >&2
 		return 0
 	fi

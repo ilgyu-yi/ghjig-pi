@@ -8,7 +8,7 @@
  * Subject under test: the fixture's byte-verified copy of THIS repository's
  * `.githooks/` tree, activated the only way a clone activates it —
  * `core.hooksPath` — and measured through `git commit` / `git push`, never
- * a predicate called directly. Nothing is written at `.ghjig/` by the
+ * a predicate called directly. Nothing is written at `.gitjig/` by the
  * fixture: the tier resolves its helper directory from the running file's
  * own installed position and its record sink from the repository top, so a
  * clone that has activated the hooks path is fully armed.
@@ -22,7 +22,7 @@
  *     the same fixture, which proves that fixture refuses a staged
  *     pattern-matching key before the arm's mutation lands;
  *   - the fixture mints its own state. No arm reads this clone's own
- *     `.ghjig/` — that is a foreign file, not one the tier authored.
+ *     `.gitjig/` — that is a foreign file, not one the tier authored.
  *
  * Environment constraints (sibling-suite doctrine, stated in place):
  *   - every secret fragment is BUILT FROM CODEPOINTS, never literal, so
@@ -80,7 +80,7 @@ const AWS_SECRET = AKIA + "IOSFODNN7EXAMPLE";
 const AWS_PATTERN_ID = "aws-access-key-id";
 
 /** The retired per-clone binding path — a file the tier no longer reads. */
-const RETIRED_BINDING_REL = join(".ghjig", "shell-adapter.sh");
+const RETIRED_BINDING_REL = join(".gitjig", "shell-adapter.sh");
 
 // ---------------------------------------------------------------------------
 // Substrate helpers.
@@ -99,7 +99,7 @@ function constructedEnv(root: string, extra: Record<string, string> = {}): Recor
 }
 
 function opSink(root: string): string {
-	return join(root, ".ghjig", "state", AUDIT_FILE_NAME);
+	return join(root, ".gitjig", "state", AUDIT_FILE_NAME);
 }
 
 function helperPath(root: string, name: string): string {
@@ -109,7 +109,7 @@ function helperPath(root: string, name: string): string {
 /**
  * A clone armed the only way the derived tier is armed: the committed
  * `.githooks/` tree at its committed relative path and `core.hooksPath`
- * naming it. NOTHING is written under `.ghjig/` — a fixture that supplied
+ * naming it. NOTHING is written under `.gitjig/` — a fixture that supplied
  * a per-clone binding would be measuring the binding, not the derivation.
  */
 function buildDerivedFixture(): GithookFixture {
@@ -147,7 +147,7 @@ function assertSecretRefused(attempt: CommitAttempt, stagedPath: string, arm: st
 		attempt.auditDelta,
 		/\bblock\b.*\bsecret\b/,
 		`${arm}: no block record naming the secret class reached the derived sink at ` +
-			`.ghjig/state/${AUDIT_FILE_NAME} (§4.6 writer path = reader path); ` +
+			`.gitjig/state/${AUDIT_FILE_NAME} (§4.6 writer path = reader path); ` +
 			`delta: ${JSON.stringify(attempt.auditDelta)}`,
 	);
 	assert.equal(
@@ -204,20 +204,20 @@ function recordsNaming(attempt: CommitAttempt, file: string): string[] {
 
 /**
  * The file below satisfies the retired delegation contract exactly —
- * `safe_source`, `audit_log`, `GHJIG_SHELL_HELPERS` — and additionally
+ * `safe_source`, `audit_log`, `GITJIG_SHELL_HELPERS` — and additionally
  * defines a function named `exit`. A tier that SOURCES it hands its own
  * shell to it: the arms' refusals set a status that the redefined `exit`
  * discards, so the scan prints its refusal over a commit that lands. A tier
  * that never reads it cannot be reached by any of that.
  */
 function plantRetiredBinding(root: string): void {
-	mkdirSync(join(root, ".ghjig"), { recursive: true });
+	mkdirSync(join(root, ".gitjig"), { recursive: true });
 	writeFileSync(
 		join(root, RETIRED_BINDING_REL),
 		[
 			"# zqplanted binding at the retired path (test substrate).",
-			`GHJIG_SHELL_HELPERS='${join(root, ".githooks", "helpers")}'`,
-			"export GHJIG_SHELL_HELPERS",
+			`GITJIG_SHELL_HELPERS='${join(root, ".githooks", "helpers")}'`,
+			"export GITJIG_SHELL_HELPERS",
 			"safe_source() {",
 			'  if [ -f "$1" ]; then',
 			'    . "$1"',
@@ -275,13 +275,13 @@ describe("a file at the retired binding path cannot reach the hook's verdict (is
 // ---------------------------------------------------------------------------
 
 describe("an activated hooks path is the whole binding (issue #68, SPEC §3.2, §4.1)", { skip: IS_WINDOWS }, () => {
-	it("a clone carrying no file under `.ghjig/` refuses a staged secret with the pattern ID on the derived record", () => {
+	it("a clone carrying no file under `.gitjig/` refuses a staged secret with the pattern ID on the derived record", () => {
 		const fixture = buildDerivedFixture();
 		try {
 			assert.equal(
-				existsSync(join(fixture.root, ".ghjig")),
+				existsSync(join(fixture.root, ".gitjig")),
 				false,
-				"derived arming: the fixture carries a `.ghjig/` of its own — the arm would measure that state " +
+				"derived arming: the fixture carries a `.gitjig/` of its own — the arm would measure that state " +
 					"rather than the derivation",
 			);
 			stageFile(fixture, "zqderivedleak.txt", `${AWS_SECRET}\n`);
@@ -326,7 +326,7 @@ describe("an activated hooks path is the whole binding (issue #68, SPEC §3.2, �
 			mkdirSync(empty);
 			appendFileSync(
 				join(mutant.root, ".githooks", "_lib.sh"),
-				`\nGHJIG_SHELL_HELPERS='${empty}'\nexport GHJIG_SHELL_HELPERS\n`,
+				`\nGITJIG_SHELL_HELPERS='${empty}'\nexport GITJIG_SHELL_HELPERS\n`,
 			);
 			stageFile(mutant, "zqmutleak.txt", `${AWS_SECRET}\n`);
 			const attempt = commitWithMessage(mutant, "chore: exercise the derivation mutant\n");
@@ -566,7 +566,7 @@ interface CrossRepoPair {
  * that does not contain the file they were resolved from.
  */
 function buildCrossRepoPair(): CrossRepoPair {
-	const tmp = mkdtempSync(join(tmpdir(), "ghjig-crossrepo-"));
+	const tmp = mkdtempSync(join(tmpdir(), "gitjig-crossrepo-"));
 	const governed = join(tmp, "governed");
 	const ungoverned = join(tmp, "ungoverned");
 	for (const root of [governed, ungoverned]) {
@@ -656,7 +656,7 @@ describe("a helper location outside the repository the hook runs against runs no
 			const governedBefore = listTreeSizes(pair.governed);
 			commitIn(pair.ungoverned, "zqcrosswriteleak.txt");
 			assert.equal(
-				existsSync(join(pair.ungoverned, ".ghjig")),
+				existsSync(join(pair.ungoverned, ".gitjig")),
 				false,
 				`cross-repository: the tier created its own state namespace inside a repository that never ` +
 					`adopted it — shell state is written only inside governed repositories (§5.5)`,
@@ -805,9 +805,9 @@ describe("the record writer sanitizes free text at the write (issue #68, SPEC §
  * shell — in a repository §5.5's boundary excludes.
  */
 const NAMESPACE_COMPONENTS = [
-	{ label: ".ghjig", plant: join(".ghjig") },
-	{ label: ".ghjig/state", plant: join(".ghjig", "state") },
-	{ label: `.ghjig/state/${AUDIT_FILE_NAME}`, plant: join(".ghjig", "state", AUDIT_FILE_NAME) },
+	{ label: ".gitjig", plant: join(".gitjig") },
+	{ label: ".gitjig/state", plant: join(".gitjig", "state") },
+	{ label: `.gitjig/state/${AUDIT_FILE_NAME}`, plant: join(".gitjig", "state", AUDIT_FILE_NAME) },
 ] as const;
 
 describe("the record writer refuses to write through a link at any component it creates (issue #68, SPEC §5.5)", { skip: IS_WINDOWS }, () => {
@@ -878,16 +878,16 @@ describe("the push adapter's ref iteration reads every line git streams (issue #
 // ---------------------------------------------------------------------------
 
 describe("the armed tier writes no code into the clone (issue #68, SPEC §4.2)", { skip: IS_WINDOWS }, () => {
-	it("everything under `.ghjig/` after an enforced refusal is the record sink, and nothing else", () => {
+	it("everything under `.gitjig/` after an enforced refusal is the record sink, and nothing else", () => {
 		const fixture = buildDerivedFixture();
 		try {
 			stageFile(fixture, "zqcensusleak.txt", `${AWS_SECRET}\n`);
 			const attempt = commitWithMessage(fixture, "chore: exercise the namespace census\n");
 			assert.notEqual(attempt.status, 0, "namespace census: the chain did not fire, so its write set is not measured");
 			assert.deepEqual(
-				listTreeEntries(join(fixture.root, ".ghjig")).sort(),
+				listTreeEntries(join(fixture.root, ".gitjig")).sort(),
 				["state", join("state", AUDIT_FILE_NAME)].sort(),
-				"namespace census: `.ghjig/` carries something other than the record sink — per-clone state is " +
+				"namespace census: `.gitjig/` carries something other than the record sink — per-clone state is " +
 					"data the shell writes, never code it executes (§4.2)",
 			);
 		} finally {
@@ -915,7 +915,7 @@ interface NestedRepo {
 
 /** A repository nested one level inside its own scratch root, tier installed at `hooksRel`. */
 function buildNestedRepo(hooksRel: string): NestedRepo {
-	const tmp = mkdtempSync(join(tmpdir(), "ghjig-nested-"));
+	const tmp = mkdtempSync(join(tmpdir(), "gitjig-nested-"));
 	const ancestor = join(tmp, "ancestor");
 	const root = join(ancestor, "repo");
 	mkdirSync(join(root, "home"), { recursive: true });
@@ -972,7 +972,7 @@ describe("the tier's locations derive from the adapters' installed position (iss
 			);
 			const probe = commitUnder(repo.root, "zqancestorleak.txt", { GIT_WORK_TREE: repo.ancestor });
 			assert.equal(
-				existsSync(join(repo.ancestor, ".ghjig")),
+				existsSync(join(repo.ancestor, ".gitjig")),
 				false,
 				"fabricated ancestor: the tier created its state namespace at the directory the ENVIRONMENT " +
 					"named, outside the repository — the record boundary §5.5 draws is then the caller's to move, " +
@@ -1045,7 +1045,7 @@ describe("the tier's locations derive from the adapters' installed position (iss
 	 */
 	it("a CDPATH naming a decoy tree does not move the tier's own derivation", () => {
 		const fixture = buildDerivedFixture();
-		const decoy = mkdtempSync(join(tmpdir(), "ghjig-cdpath-decoy-"));
+		const decoy = mkdtempSync(join(tmpdir(), "gitjig-cdpath-decoy-"));
 		try {
 			mkdirSync(join(decoy, ".githooks", "helpers"), { recursive: true });
 			assertFixtureArmed(fixture, "zqcdpathctl.txt", "CDPATH decoy");

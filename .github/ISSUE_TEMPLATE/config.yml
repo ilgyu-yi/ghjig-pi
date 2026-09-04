@@ -1,6 +1,6 @@
 blank_issues_enabled: false
 # Discussions are not enabled on this repo (verified 2026-08-28 via
-# `gh api repos/ilgyu-yi/ghjig-pi --jq .has_discussions` → false).
+# `gh api repos/ilgyu-yi/gitjig-pi --jq .has_discussions` → false).
 # When Discussions is enabled later, add a `contact_links:` entry here
 # pointing at the Discussions URL.
 contact_links: []

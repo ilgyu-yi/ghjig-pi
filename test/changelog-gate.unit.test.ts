@@ -635,7 +635,7 @@ function buildRoot(spec: CaseSpec): string {
 		assert.ok(shared, `${spec.id} shares the root of ${spec.shareRootWith}, which must be built first`);
 		return shared;
 	}
-	const root = mkdtempSync(join(tmpdir(), `ghjig-changelog-${spec.id}-`));
+	const root = mkdtempSync(join(tmpdir(), `gitjig-changelog-${spec.id}-`));
 	for (const [relPath, content] of Object.entries(spec.files)) {
 		const target = join(root, relPath);
 		mkdirSync(dirname(target), { recursive: true });

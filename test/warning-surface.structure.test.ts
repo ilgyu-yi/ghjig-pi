@@ -2,7 +2,7 @@
  * Structural suite for the warning-surface escaping rule (issue #47).
  *
  * Subject under test: the text of the four shipped runtime sources,
- * `.pi/extensions/ghjig/{audit,locate,state-root,postures}.ts`.
+ * `.pi/extensions/gitjig/{audit,locate,state-root,postures}.ts`.
  *
  * The rule (SPEC §3.10): "a write the guard itself permits must not be able
  * to forge the guard's decisions", and the mitigation for such a class
@@ -72,7 +72,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { repoRoot } from "./harness/run-pi.ts";
 
-const EXTENSION_DIR = join(repoRoot(), ".pi", "extensions", "ghjig");
+const EXTENSION_DIR = join(repoRoot(), ".pi", "extensions", "gitjig");
 
 /**
  * The roster and each file's exact-text allowlist of non-path expressions.

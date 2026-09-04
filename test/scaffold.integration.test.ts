@@ -1,15 +1,15 @@
 /**
  * Integration suite for the tier-1 runtime scaffold (issue #32 ACs).
  *
- * Drives real `pi` sessions through the hermetic harness against the ghjig
+ * Drives real `pi` sessions through the hermetic harness against the gitjig
  * extension loaded from THIS repository's tree (fixture symlinks
- * `.pi/extensions/ghjig.ts` + `.pi/extensions/ghjig/`). Pinned runtime
+ * `.pi/extensions/gitjig.ts` + `.pi/extensions/gitjig/`). Pinned runtime
  * surface:
  *
  *   - audit records (one JSON object per line in `<seam>/audit.jsonl`)
  *     with `action` markers ordered `ext-load` → `session-start`, plus a
  *     `seam-active` announcement when the test seam is active (§4.6, §5.5);
- *   - a post-session_start session entry `customType: "ghjig-registration"`
+ *   - a post-session_start session entry `customType: "gitjig-registration"`
  *     with `data: { repoRoot, stateRoot, seamActive, auditWritable }` (§5.9;
  *     spike: appendEntry is an action method, legal only after
  *     session_start), reported two-sided: `true` on a live sink and `false`
@@ -18,19 +18,19 @@
  *     but unusable refuses the run and names its own recovery, reached
  *     through the harness's explicit `seamOverride` opt-in (§3.9, §3.11);
  *   - the harness's own seam integrity: `RunOptions.env` cannot replace
- *     `GHJIG_TEST_STATE_ROOT`, so nothing but an explicit opt-in moves a
+ *     `GITJIG_TEST_STATE_ROOT`, so nothing but an explicit opt-in moves a
  *     run's state root (§4.6);
  *   - no action method at extension load, checked against the D1-calibrated
  *     failure class (§3.2; §3.9 refuse-not-approve);
  *   - D2 tree isolation: `git status --porcelain` identical before/after,
- *     and the operational state root `<repo>/.ghjig/state/` in the same
+ *     and the operational state root `<repo>/.gitjig/state/` in the same
  *     state after the suite as before it — same absence, or the same
  *     entries at the same sizes, so a suite appending into a trail that
  *     already existed is caught too and not only one adding a file, which
- *     `/.ghjig/` being git-ignored keeps out of the porcelain arm (§5.5 —
+ *     `/.gitjig/` being git-ignored keeps out of the porcelain arm (§5.5 —
  *     the seam, never the operational sink). The
- *     assertion targets `.ghjig/state/` rather than all of `.ghjig/` because
- *     `.ghjig/` legitimately holds per-clone untracked state in a working
+ *     assertion targets `.gitjig/state/` rather than all of `.gitjig/` because
+ *     `.gitjig/` legitimately holds per-clone untracked state in a working
  *     clone (§4.1); the runtime's own sink is what must stay untouched.
  *   - polluted-ambient re-run: byte-identical resolution and zero writes
  *     into a decoy tree (§4.6), under a positive control that the decoy
@@ -45,7 +45,7 @@ import { after, before, describe, it } from "node:test";
 // The audit destination name comes from the runtime itself: the dead-sink arm
 // blocks exactly the path the runtime appends to, so a rename there moves the
 // block with it instead of silently unblocking the append.
-import { AUDIT_FILE_NAME } from "../.pi/extensions/ghjig/audit.ts";
+import { AUDIT_FILE_NAME } from "../.pi/extensions/gitjig/audit.ts";
 import {
 	buildFixture,
 	type Fixture,
@@ -62,14 +62,14 @@ import {
 	type ScriptTurn,
 } from "./harness/run-pi.ts";
 
-const OPERATIONAL_STATE_ROOT = join(repoRoot(), ".ghjig", "state");
-const DECOY_VARS = ["GHJIG_ROOT", "GHJIG_STATE_ROOT", "GHJIG_PI_ROOT", "PI_STATE_ROOT"] as const;
+const OPERATIONAL_STATE_ROOT = join(repoRoot(), ".gitjig", "state");
+const DECOY_VARS = ["GITJIG_ROOT", "GITJIG_STATE_ROOT", "GITJIG_PI_ROOT", "PI_STATE_ROOT"] as const;
 
 /**
  * The operational state root as a snapshot: `undefined` when it is absent,
  * otherwise every entry under it WITH ITS SIZE. Existence alone would not
  * catch a suite that writes INTO a root an operational writer had already
- * created, and `/.ghjig/` is git-ignored, so the porcelain arm does not
+ * created, and `/.gitjig/` is git-ignored, so the porcelain arm does not
  * catch it either. Names alone would not either: the shape this arm is
  * most owed is a suite appending a line to a trail that was already there,
  * and an append changes no name. The size is what makes that visible.
@@ -83,8 +83,8 @@ function operationalSnapshot(): string[] | undefined {
 }
 
 const SCRIPT: ScriptTurn[] = [
-	{ kind: "toolCall", name: "bash", arguments: { command: "echo GHJIG_IT_TOOL_RAN" } },
-	{ kind: "text", text: "GHJIG_IT_DONE" },
+	{ kind: "toolCall", name: "bash", arguments: { command: "echo GITJIG_IT_TOOL_RAN" } },
+	{ kind: "text", text: "GITJIG_IT_DONE" },
 ];
 
 /**
@@ -94,10 +94,10 @@ const SCRIPT: ScriptTurn[] = [
  * immunity claims rest on a run that is demonstrably polluted rather than on
  * the builder's intent to pollute it.
  */
-const DECOY_WITNESS = "GHJIG_DECOY_SEEN";
+const DECOY_WITNESS = "GITJIG_DECOY_SEEN";
 const POLLUTED_SCRIPT: ScriptTurn[] = [
-	{ kind: "toolCall", name: "bash", arguments: { command: `echo "${DECOY_WITNESS}=[$GHJIG_ROOT]"` } },
-	{ kind: "text", text: "GHJIG_IT_DONE" },
+	{ kind: "toolCall", name: "bash", arguments: { command: `echo "${DECOY_WITNESS}=[$GITJIG_ROOT]"` } },
+	{ kind: "text", text: "GITJIG_IT_DONE" },
 ];
 
 const VIOLATING_ENTRY = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -121,7 +121,7 @@ interface AuditRecord {
 
 function registrationEntries(fixture: Fixture): RegistrationEntry[] {
 	return readSessionEntries(fixture).filter(
-		(entry) => entry.type === "custom" && entry.customType === "ghjig-registration",
+		(entry) => entry.type === "custom" && entry.customType === "gitjig-registration",
 	) as unknown as RegistrationEntry[];
 }
 
@@ -132,7 +132,7 @@ function diagnostics(result: PiRunResult): string {
 function requireAudit(fixture: Fixture, result: PiRunResult): string[] {
 	assert.ok(
 		existsSync(fixture.auditFile),
-		`no audit file at ${fixture.auditFile} — the ghjig extension left no load evidence\n${diagnostics(result)}`,
+		`no audit file at ${fixture.auditFile} — the gitjig extension left no load evidence\n${diagnostics(result)}`,
 	);
 	return readAuditLines(fixture);
 }
@@ -162,7 +162,7 @@ before(async () => {
 	operationalBefore = operationalSnapshot();
 
 	// Run 1: clean scripted session against the repo-tree runtime.
-	cleanFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	cleanFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	cleanRun = await runPi(cleanFixture);
 
 	// Run 2: D1 negative control — per-suite detector calibration.
@@ -173,12 +173,12 @@ before(async () => {
 	d1Run = await runPi(d1Fixture);
 
 	// Run 3: same scripted session, polluted ambient environment.
-	decoyTree = mkdtempSync(join(tmpdir(), "ghjig-decoy-"));
+	decoyTree = mkdtempSync(join(tmpdir(), "gitjig-decoy-"));
 	mkdirSync(join(decoyTree, ".pi", "extensions"), { recursive: true });
-	mkdirSync(join(decoyTree, ".ghjig", "state"), { recursive: true });
+	mkdirSync(join(decoyTree, ".gitjig", "state"), { recursive: true });
 	writeFileSync(join(decoyTree, ".pi", "extensions", "look-alike.ts"), "// decoy\n");
 	decoyEntriesBefore = listTreeEntries(decoyTree);
-	pollutedFixture = buildFixture({ script: POLLUTED_SCRIPT, linkGhjigRuntime: true });
+	pollutedFixture = buildFixture({ script: POLLUTED_SCRIPT, linkGitjigRuntime: true });
 	const decoyEnv: Record<string, string> = {};
 	for (const name of DECOY_VARS) {
 		decoyEnv[name] = decoyTree;
@@ -188,16 +188,16 @@ before(async () => {
 	// Run 4: the generic env channel tries to replace the state seam with an
 	// unusable value. The seam is bound after the spread, so the attempt must
 	// not reach it — `seamOverride` is the only door (§4.6).
-	seamDecoyFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	seamDecoyFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	seamDecoyRun = await runPi(seamDecoyFixture, {
-		env: { GHJIG_TEST_STATE_ROOT: "relative/state-root" },
+		env: { GITJIG_TEST_STATE_ROOT: "relative/state-root" },
 	});
 
 	// Runs 5 and 6: the fail-closed `seam-target` row, driven end to end
 	// through the explicit opt-in — a relative seam and an empty one.
-	relativeSeamFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	relativeSeamFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	relativeSeamRun = await runPi(relativeSeamFixture, { seamOverride: "relative/state-root" });
-	emptySeamFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	emptySeamFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	emptySeamRun = await runPi(emptySeamFixture, { seamOverride: "" });
 
 	// Run 7: a usable seam whose audit sink underneath is dead. The seam
@@ -207,7 +207,7 @@ before(async () => {
 	// a mode-0500 seam would still admit the append for uid 0 and false-red
 	// this arm in a root CI container, and a check that can false-red is
 	// itself a defect (§3.12).
-	deadSinkFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	deadSinkFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	const deadSinkSeam = join(deadSinkFixture.root, "dead-sink-state");
 	mkdirSync(join(deadSinkSeam, AUDIT_FILE_NAME), { recursive: true });
 	deadSinkRun = await runPi(deadSinkFixture, { seamOverride: deadSinkSeam });
@@ -246,7 +246,7 @@ describe("AC1: extension loads from the repository tree and registers at session
 		assert.equal(
 			entries.length,
 			1,
-			`expected exactly one ghjig-registration session entry\n${diagnostics(cleanRun)}`,
+			`expected exactly one gitjig-registration session entry\n${diagnostics(cleanRun)}`,
 		);
 	});
 
@@ -352,7 +352,7 @@ describe("AC4: polluted ambient environment (§4.6)", () => {
 	it("positive control: the decoy variables reached the child process", () => {
 		// Every other arm in this block asserts that the decoys changed
 		// nothing. That claim is only worth something if the decoys were
-		// there: the run's own tool call echoes GHJIG_ROOT back into the
+		// there: the run's own tool call echoes GITJIG_ROOT back into the
 		// session JSONL, so the pollution is measured on the child, not
 		// assumed from the environment the harness assembled.
 		const witness = readSessionEntries(pollutedFixture).some((entry) =>
@@ -396,9 +396,9 @@ describe("AC4: polluted ambient environment (§4.6)", () => {
 });
 
 describe("AC5: an unusable seam refuses the run end to end (§3.9 seam-target, §5.5)", () => {
-	const REFUSAL = /GHJIG_TEST_STATE_ROOT is set but not an absolute path/;
+	const REFUSAL = /GITJIG_TEST_STATE_ROOT is set but not an absolute path/;
 	const RECOVERY =
-		/Recovery: unset GHJIG_TEST_STATE_ROOT to use the operational state root, or point it at an existing absolute directory\./;
+		/Recovery: unset GITJIG_TEST_STATE_ROOT to use the operational state root, or point it at an existing absolute directory\./;
 
 	it("refuses a relative seam: non-zero exit, no fallback to the operational root", () => {
 		assert.notEqual(relativeSeamRun.exitCode, 0, diagnostics(relativeSeamRun));
@@ -443,7 +443,7 @@ describe("AC2/D2: repository-tree isolation snapshot", () => {
 		// measuring the suite the moment such a writer exists. Stated as mere
 		// existence — or as the entry NAMES alone, which an append leaves
 		// untouched — it would miss the shape it is most owed: a suite
-		// appending into a trail that was already there, which `/.ghjig/`
+		// appending into a trail that was already there, which `/.gitjig/`
 		// being git-ignored keeps out of the porcelain arm below as well. So
 		// the comparison is each entry with its size, and absence is one of
 		// its values.
@@ -463,7 +463,7 @@ describe("AC2/D2: repository-tree isolation snapshot", () => {
 		// `snapshotOf`, not of today's disk. Measured here on a disposable
 		// root, because staging it at the operational root would be the very
 		// write this block forbids.
-		const probe = mkdtempSync(join(tmpdir(), "ghjig-d2-mechanism-"));
+		const probe = mkdtempSync(join(tmpdir(), "gitjig-d2-mechanism-"));
 		try {
 			const sink = join(probe, AUDIT_FILE_NAME);
 			writeFileSync(sink, `${JSON.stringify({ pre: "existing" })}\n`);

@@ -92,8 +92,8 @@ if [ -z "$_gh_top" ] || [ "$_gh_top" != "$_gh_op_top" ]; then
   printf '[dev-shell] local hook tier not enforced: the repository these hooks are committed in did not resolve to the one this operation runs against, so this hook ran no check and wrote no record\n' >&2
   exit 0
 fi
-GHJIG_SHELL_HELPERS="$_gh_here/helpers"
-GHJIG_AUDIT_SINK="$_gh_top/.ghjig/state/audit.jsonl"
+GITJIG_SHELL_HELPERS="$_gh_here/helpers"
+GITJIG_AUDIT_SINK="$_gh_top/.gitjig/state/audit.jsonl"
 
 # audit_log <action> <category> [text...] — append ONE sanitized JSON
 # record to the sink: control bytes stripped, backslash and double-quote
@@ -121,8 +121,8 @@ GHJIG_AUDIT_SINK="$_gh_top/.ghjig/state/audit.jsonl"
 #
 # The write-through refusal covers every component of the sink path that
 # lies inside the shell's own namespace, each derived from the sink path
-# rather than spelled by hand: the container (`.ghjig`), the state
-# directory (`.ghjig/state`), and the sink file itself. Two questions are
+# rather than spelled by hand: the container (`.gitjig`), the state
+# directory (`.gitjig/state`), and the sink file itself. Two questions are
 # asked of them, because a link is not the only object that hijacks a
 # write. A link at any component is another writer's target — `[ -d ]`,
 # `mkdir -p` and the append alike would follow it — so the record is
@@ -139,7 +139,7 @@ GHJIG_AUDIT_SINK="$_gh_top/.ghjig/state/audit.jsonl"
 #
 # This function is not the sink's only writer, and the refusals above bind
 # THIS one. The extension runtime appends to the same file through
-# `appendAuditRecord` (.pi/extensions/ghjig/audit.ts), which opens with
+# `appendAuditRecord` (.pi/extensions/gitjig/audit.ts), which opens with
 # O_NOFOLLOW|O_NONBLOCK and holds the descriptor to an fstat verdict.
 # Neither writer contains the other, and what each covers divides. On the
 # LINK dimension this one refuses all three components of the sink path
@@ -172,16 +172,16 @@ audit_log() {
     esac
     _ga_text=$(printf '%s' "$*" | LC_ALL=C tr -d '\000-\037\177' | LC_ALL=C sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
     _ga_ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null) || _ga_ts=unknown
-    _ga_dir="${GHJIG_AUDIT_SINK%/*}"
+    _ga_dir="${GITJIG_AUDIT_SINK%/*}"
     _ga_ns="${_ga_dir%/*}"
     # Namespace container, state directory, sink file (header note).
     [ -L "$_ga_ns" ] && exit 0
     [ -L "$_ga_dir" ] && exit 0
     [ -d "$_ga_dir" ] || (umask 077; mkdir -p "$_ga_dir") 2>/dev/null || exit 0
-    [ -L "$GHJIG_AUDIT_SINK" ] && exit 0
-    [ -e "$GHJIG_AUDIT_SINK" ] && [ ! -f "$GHJIG_AUDIT_SINK" ] && exit 0
+    [ -L "$GITJIG_AUDIT_SINK" ] && exit 0
+    [ -e "$GITJIG_AUDIT_SINK" ] && [ ! -f "$GITJIG_AUDIT_SINK" ] && exit 0
     printf '{"timestamp":"%s","category":"%s","action":"%s","text":"%s"}\n' \
-      "$_ga_ts" "$_ga_category" "$_ga_action" "$_ga_text" >> "$GHJIG_AUDIT_SINK"
+      "$_ga_ts" "$_ga_category" "$_ga_action" "$_ga_text" >> "$GITJIG_AUDIT_SINK"
   ) 2>/dev/null || true
   return 0
 }
@@ -245,7 +245,7 @@ githook_source() {
     trap 'printf "[dev-shell] local hook tier not enforced: a helper did not finish sourcing, so this hook stopped there and ran none of its remaining checks\n" >&2; ( audit_log warn "${_gh_src_cat:-git-hook-tier}" source-incomplete "${_gh_src_file:-unknown}" ) >/dev/null 2>&1 || true; exit 0' EXIT
   fi
   _GH_SRC_DEPTH=$(( ${_GH_SRC_DEPTH:-0} + 1 ))
-  safe_source "$GHJIG_SHELL_HELPERS/$_gh_src_file" "$_gh_src_cat"
+  safe_source "$GITJIG_SHELL_HELPERS/$_gh_src_file" "$_gh_src_cat"
   _gh_src_rc=$?
   _GH_SRC_DEPTH=$(( ${_GH_SRC_DEPTH:-0} - 1 ))
   [ "${_GH_SRC_DEPTH:-0}" -gt 0 ] || trap - EXIT
