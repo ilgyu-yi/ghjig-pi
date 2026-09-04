@@ -9,12 +9,12 @@
  * process working directory.
  *
  * The walk is bounded below by the structural root the install layout
- * implies (`.pi/extensions/ghjig/` → three levels up). A `.pi/` directory
+ * implies (`.pi/extensions/gitjig/` → three levels up). A `.pi/` directory
  * strictly BELOW that root cannot be the repository root — a repository
  * binds at its root only, never recursively into subprojects (§4.7) — so
  * such a candidate is rejected with a warning naming it, and the walk
  * continues upward. Without the bound a single empty, git-invisible
- * `mkdir .pi/extensions/ghjig/.pi` would silently relocate the evidence
+ * `mkdir .pi/extensions/gitjig/.pi` would silently relocate the evidence
  * sink into the install tree. The upper bound is unchanged: the walk still
  * terminates at the filesystem root and a legitimately higher `.pi/`
  * ancestor is still accepted.
@@ -78,7 +78,7 @@ function isDirectory(path: string): boolean {
 export function locateRepoRootFrom(moduleFile: string): string {
 	if (!isAbsolute(moduleFile)) {
 		throw new Error(
-			`[ghjig] repo-root discovery cannot anchor the relative module path ${quoted(moduleFile)}: ` +
+			`[gitjig] repo-root discovery cannot anchor the relative module path ${quoted(moduleFile)}: ` +
 				`resolution never consults the process working directory (§4.6), and a relative path ` +
 				`has no other anchor — answering would give a different repository root per directory. ` +
 				`Recovery: pass the installed module's absolute path ` +
@@ -94,7 +94,7 @@ export function locateRepoRootFrom(moduleFile: string): string {
 				return current;
 			}
 			console.warn(
-				`[ghjig] ignoring the .pi/ directory at ${quoted(current)}: it sits below the install root ` +
+				`[gitjig] ignoring the .pi/ directory at ${quoted(current)}: it sits below the install root ` +
 					`${quoted(structuralRoot)}, so it cannot be the repository root — a repository binds at ` +
 					`its root only, never recursively into subprojects (§4.7)`,
 			);
@@ -106,7 +106,7 @@ export function locateRepoRootFrom(moduleFile: string): string {
 		current = parent;
 	}
 	console.warn(
-		`[ghjig] repo-root discovery failed: no admissible .pi/ ancestor above ${quoted(moduleFile)}; ` +
+		`[gitjig] repo-root discovery failed: no admissible .pi/ ancestor above ${quoted(moduleFile)}; ` +
 			`degrading open to the structural root ${quoted(structuralRoot)} (§3.9)`,
 	);
 	return structuralRoot;
@@ -127,7 +127,7 @@ export function locateRepoRoot(): string {
 		// embeds the failing path verbatim, so the cause is interpolated
 		// through `quoted` exactly as the path itself is.
 		console.warn(
-			`[ghjig] could not resolve the installed module path ${quoted(self)} through its links; ` +
+			`[gitjig] could not resolve the installed module path ${quoted(self)} through its links; ` +
 				`locating from the unresolved path instead, which mislocates the repository root if ` +
 				`the install is a symlink (§3.9). Cause: ${quoted(error instanceof Error ? error.message : String(error))}. ` +
 				`Recovery: restore read access to every directory on that path, then start a new session.`,

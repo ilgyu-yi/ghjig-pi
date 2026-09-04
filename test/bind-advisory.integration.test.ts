@@ -4,10 +4,10 @@
  * stamp-after-success, §4.6 detector-placement).
  *
  * Drives real `pi` sessions through the hermetic harness (seam-rooted state,
- * §5.5) against the ghjig runtime linked from THIS repository's tree. Each
+ * §5.5) against the gitjig runtime linked from THIS repository's tree. Each
  * fixture root is made a git repository carrying a copy of the committed
  * `.githooks/` tree, shaped into one binding state; the suite then reads the
- * session JSONL for `customType: "ghjig-bind-advisory"` entries — the
+ * session JSONL for `customType: "gitjig-bind-advisory"` entries — the
  * pinned, harness-readable advisory surface.
  *
  * The advisory's STATE SET — which configurations are loud and which silent
@@ -26,12 +26,12 @@
  *   - arms that hold whatever the detector does — the reaped-child
  *     completion — are declared BOUNDARY PINS in place and state what
  *     mutation reddens them;
- *   - the stamp arms import `.pi/extensions/ghjig/bind-state.ts` and read
+ *   - the stamp arms import `.pi/extensions/gitjig/bind-state.ts` and read
  *     its exported `BIND_ADVISORY_STAMP_FILE`, so the stamp's location is
  *     the module's to name and this suite cannot drift from it.
  *
  * PINNED SURFACES (what the runtime and this suite agree on):
- *   - advisory entry type: `ghjig-bind-advisory`; each degraded-state entry
+ *   - advisory entry type: `gitjig-bind-advisory`; each degraded-state entry
  *     names its state token (`unbound` / `foreign-bound`) and the exact
  *     re-arm command `bash .githooks/bind_local_tier.sh` somewhere in its
  *     serialized form;
@@ -75,17 +75,17 @@ import {
 
 const IS_WINDOWS = process.platform === "win32";
 
-const ADVISORY_TYPE = "ghjig-bind-advisory";
+const ADVISORY_TYPE = "gitjig-bind-advisory";
 const REARM = "bash .githooks/bind_local_tier.sh";
 const INSTRUMENT_REL = join(".githooks", "bind_local_tier.sh");
 /** The retired per-clone binding path — a file no surface reads. */
-const RETIRED_BINDING_REL = join(".ghjig", "shell-adapter.sh");
+const RETIRED_BINDING_REL = join(".gitjig", "shell-adapter.sh");
 /** Diagnostic hint: what must hold for a per-state arm to find its entry. */
 const OWES_ADVISORY = "the session-start advisory owes exactly one entry per degraded state";
 
 const SCRIPT: ScriptTurn[] = [
-	{ kind: "toolCall", name: "bash", arguments: { command: "echo GHJIG_BIND_IT_RAN" } },
-	{ kind: "text", text: "GHJIG_BIND_IT_DONE" },
+	{ kind: "toolCall", name: "bash", arguments: { command: "echo GITJIG_BIND_IT_RAN" } },
+	{ kind: "text", text: "GITJIG_BIND_IT_DONE" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -150,7 +150,7 @@ function diagnostics(result: PiRunResult): string {
 }
 
 /**
- * Positive control for every advisory and silence claim: the ghjig runtime
+ * Positive control for every advisory and silence claim: the gitjig runtime
  * demonstrably LOADED in this fixture's session(s) (its registration entry
  * exists). Without it, a silence pin would also pass on a session where the
  * extension never ran, and a per-state arm's red could hide a broken
@@ -158,11 +158,11 @@ function diagnostics(result: PiRunResult): string {
  */
 function requireRuntimeLoaded(fixture: Fixture, run: PiRunResult, arm: string): void {
 	const registrations = readSessionEntries(fixture).filter(
-		(entry) => entry.type === "custom" && entry.customType === "ghjig-registration",
+		(entry) => entry.type === "custom" && entry.customType === "gitjig-registration",
 	);
 	assert.ok(
 		registrations.length >= 1,
-		`${arm}: no ghjig-registration entry — the runtime never loaded, so every advisory/silence claim ` +
+		`${arm}: no gitjig-registration entry — the runtime never loaded, so every advisory/silence claim ` +
 			`here is vacuous\n${diagnostics(run)}`,
 	);
 }
@@ -263,7 +263,7 @@ interface BindStateModule {
  * path nothing writes.
  */
 async function bindStateModule(): Promise<BindStateModule> {
-	const modulePath = join(repoRoot(), ".pi", "extensions", "ghjig", "bind-state.ts");
+	const modulePath = join(repoRoot(), ".pi", "extensions", "gitjig", "bind-state.ts");
 	assert.equal(existsSync(modulePath), true, `${modulePath} is missing — the detector under test is not there`);
 	const module = (await import(pathToFileURL(modulePath).href)) as {
 		BIND_ADVISORY_STAMP_FILE?: unknown;
@@ -362,7 +362,7 @@ function assertOneStampRefusal(fixture: Fixture, stampPath: string, arm: string)
 before(async () => {
 	// 1) Unbound clone — doubles as the TTL-debounce fixture (two sessions
 	// against ONE seam root; entries snapshotted between runs).
-	unboundFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	unboundFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(unboundFixture);
 	unboundRun1 = await runPi(unboundFixture);
 	advisoriesAfterRun1 = advisoryEntries(unboundFixture);
@@ -374,7 +374,7 @@ before(async () => {
 	// and runs no program of the repository it classifies (§5.9), so the
 	// canary must stay absent AND the fixture's real state (unbound) must
 	// still surface — a forged token must reach no verdict.
-	canaryFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	canaryFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(canaryFixture);
 	canaryPath = join(canaryFixture.root, "zqcanary-instrument");
 	writeFileSync(
@@ -386,10 +386,10 @@ before(async () => {
 
 	// 3) A file at the RETIRED per-clone binding path with `core.hooksPath`
 	// unset: no configured hooks path means git fires nothing, whatever sits
-	// under `.ghjig/`, so the state is unbound and loud.
-	retiredPathFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	// under `.gitjig/`, so the state is unbound and loud.
+	retiredPathFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(retiredPathFixture);
-	mkdirSync(join(retiredPathFixture.root, ".ghjig"));
+	mkdirSync(join(retiredPathFixture.root, ".gitjig"));
 	writeFileSync(
 		join(retiredPathFixture.root, RETIRED_BINDING_REL),
 		"# zqretired file at the retired binding path\n",
@@ -404,7 +404,7 @@ before(async () => {
 	// (§4.6). The pi fixture's runtime assets are transplanted into the
 	// worktree; sessions, state seam and HOME stay at the original fixture's
 	// absolute paths.
-	worktreeTmp = mkdtempSync(join(tmpdir(), "ghjig-bindadv-wt-"));
+	worktreeTmp = mkdtempSync(join(tmpdir(), "gitjig-bindadv-wt-"));
 	const mainRoot = join(worktreeTmp, "mainclone");
 	mkdirSync(join(mainRoot, "home"), { recursive: true });
 	const mainHome = join(mainRoot, "home");
@@ -424,7 +424,7 @@ before(async () => {
 	runGit(mainRoot, mainHome, ["config", "core.hooksPath", ".githooks"]);
 	const wtRoot = join(worktreeTmp, "zqworktree");
 	runGit(mainRoot, mainHome, ["worktree", "add", "-q", "--detach", wtRoot, preHooks]);
-	worktreeFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	worktreeFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	cpSync(join(worktreeFixture.root, ".pi"), join(wtRoot, ".pi"), { recursive: true });
 	copyFileSync(join(worktreeFixture.root, "script.json"), join(wtRoot, "script.json"));
 	worktreeRun = await runPi({ ...worktreeFixture, root: wtRoot });
@@ -432,7 +432,7 @@ before(async () => {
 	// 5) Erroring detector child: a PATH shim whose `git config` exits 3 —
 	// neither a resolved value nor git's own "unset" status. A compute that
 	// never answered owes silence and, having earned no TTL, no stamp.
-	erroringFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	erroringFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(erroringFixture);
 	erroringRun = await runPi(erroringFixture, {
 		env: { PATH: `${gitShimDir(erroringFixture.root, "zqerrshim", "config", "exit 3")}:${process.env.PATH ?? ""}` },
@@ -442,7 +442,7 @@ before(async () => {
 	// shim whose `git rev-parse --show-toplevel` sleeps past every bound in
 	// play. The timeout must reap it and the session completes, silent and
 	// stampless.
-	hangingGitFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	hangingGitFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(hangingGitFixture);
 	hangingGitRun = await runPi(hangingGitFixture, {
 		env: {
@@ -455,7 +455,7 @@ before(async () => {
 	// on the stamp parks session start with nothing to reap. Every read the
 	// detector performs before or during session_start must be lstat-gated
 	// to a plain regular file under a size cap first.
-	fifoStampFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	fifoStampFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(fifoStampFixture);
 	fifoStampTarget = join(fifoStampFixture.root, "zqstampfifo");
 	spawnSync("mkfifo", [fifoStampTarget], { timeout: 30_000 });
@@ -467,7 +467,7 @@ before(async () => {
 	// `writeFileSync` both follow a directory-level link, so the stamp
 	// writer must refuse every component it would create or write through,
 	// not the leaf alone.
-	linkedStateRootFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	linkedStateRootFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(linkedStateRootFixture);
 	stateRootVictim = join(linkedStateRootFixture.root, "zqstaterootvictim");
 	mkdirSync(stateRootVictim);
@@ -482,7 +482,7 @@ before(async () => {
 	// FIFO blocks with nothing for the child timeout to reap. The write must
 	// be gated on file TYPE at the descriptor it opened — the shape `audit.ts`
 	// already holds its own sink to.
-	bareFifoStampFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	bareFifoStampFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(bareFifoStampFixture);
 	bareFifoStampPath = join(bareFifoStampFixture.stateDir, await bindAdvisoryStampFile());
 	spawnSync("mkfifo", [bareFifoStampPath], { timeout: 30_000 });
@@ -496,7 +496,7 @@ before(async () => {
 	// the open empties the victim inside `open(2)` and the verdict then
 	// refuses a file it has already destroyed — the whole point of holding a
 	// descriptor to a verdict is that the refusal arrives BEFORE the write.
-	hardLinkedStampFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	hardLinkedStampFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(hardLinkedStampFixture);
 	hardLinkedStampVictim = join(hardLinkedStampFixture.root, "zqstamphardlinkvictim");
 	writeFileSync(hardLinkedStampVictim, STAMP_VICTIM_BYTES);
@@ -510,7 +510,7 @@ before(async () => {
 	// hostile: the mode is all that fails, the write is refused, and the
 	// debounce is then dead for every later session. A refusal discarded on
 	// this path leaves a silently degraded state, which §5.2 forbids.
-	looseModeStampFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	looseModeStampFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(looseModeStampFixture);
 	looseModeStampPath = join(looseModeStampFixture.stateDir, await bindAdvisoryStampFile());
 	writeFileSync(looseModeStampPath, STAMP_VICTIM_BYTES);
@@ -583,7 +583,7 @@ describe("an unbound clone surfaces one actionable advisory (issue #68 AC5, SPEC
 			retiredPathFixture,
 			retiredPathRun,
 			"unbound",
-			"an unset activation is the whole verdict; no file under .ghjig/ enters it",
+			"an unset activation is the whole verdict; no file under .gitjig/ enters it",
 		);
 	});
 });
@@ -887,9 +887,9 @@ describe("advisory hygiene: TTL, stamp-after-success, degrade-to-silence (issue 
 		// seam must already exist for the run to resolve at all (§5.5's
 		// disposable root), so no session can measure the creation.
 		const { maybeAdviseBindState, BIND_ADVISORY_STAMP_FILE } = await bindStateModule();
-		const base = mkdtempSync(join(tmpdir(), "ghjig-bindumask-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-bindumask-"));
 		try {
-			const container = join(base, "zqperm", ".ghjig");
+			const container = join(base, "zqperm", ".gitjig");
 			const stateRoot = join(container, "state");
 			const previousUmask = process.umask(0o000);
 			try {

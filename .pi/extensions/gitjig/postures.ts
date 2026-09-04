@@ -205,7 +205,7 @@ export const POSTURES: readonly PostureRow[] = [
 	{
 		dependency: "seam-target",
 		failureShape:
-			"GHJIG_TEST_STATE_ROOT set but empty, relative, or not measurable as a directory by this account " +
+			"GITJIG_TEST_STATE_ROOT set but empty, relative, or not measurable as a directory by this account " +
 			"(missing, not a directory, or refused)",
 		posture: "closed",
 		justification:

@@ -12,7 +12,7 @@
  *      class cannot be provoked, this suite FAILS as "detector cannot
  *      measure" (§3.9: an unmeasurable predicate refuses, never approves).
  *
- * Uses throwaway PROBE extensions generated here — never the ghjig runtime
+ * Uses throwaway PROBE extensions generated here — never the gitjig runtime
  * — so its result depends on the harness and the substrate alone: a red here
  * means the measuring instrument is broken, never the runtime under test.
  */
@@ -114,10 +114,10 @@ describe("harness: symlinked extension entry (repo-tree load shape)", () => {
 		// Probe sources live OUTSIDE the fixture; only symlinks sit under
 		// `.pi/extensions/` — the exact shape the AC suites use to load the
 		// runtime from the repository tree. Both the entry and its module
-		// directory are linked (as for `ghjig.ts` + `ghjig/`), so the suite
+		// directory are linked (as for `gitjig.ts` + `gitjig/`), so the suite
 		// asserts observable load behavior without depending on whether the
 		// loader resolves the entry's realpath.
-		realDir = mkdtempSync(join(tmpdir(), "ghjig-probe-real-"));
+		realDir = mkdtempSync(join(tmpdir(), "gitjig-probe-real-"));
 		writeFileSync(join(realDir, "probe.ts"), PROBE_ENTRY);
 		mkdirSync(join(realDir, "probe"));
 		writeFileSync(join(realDir, "probe", "mod.ts"), PROBE_MODULE);

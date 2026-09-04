@@ -13,7 +13,7 @@
  *     governed clone carries (§3.2): the adapters derive their helper
  *     directory from their own installed position and their record sink
  *     from the repository top, so the fixture writes nothing under
- *     `.ghjig/` and a degradation arm mutates the fixture's own
+ *     `.gitjig/` and a degradation arm mutates the fixture's own
  *     `.githooks/helpers` — the layout every deployment runs.
  *
  * Every check drives `git commit` through this fixture, never a predicate
@@ -205,7 +205,7 @@ function assertTreesIdentical(sourceDir: string, copyDir: string): void {
 }
 
 export function buildGithookFixture(options: GithookFixtureOptions = {}): GithookFixture {
-	const root = mkdtempSync(join(tmpdir(), "ghjig-githook-"));
+	const root = mkdtempSync(join(tmpdir(), "gitjig-githook-"));
 	mkdirSync(join(root, "home"));
 
 	const sourceHooks = join(repoRoot(), ".githooks");
@@ -214,7 +214,7 @@ export function buildGithookFixture(options: GithookFixtureOptions = {}): Githoo
 	assertTreesIdentical(sourceHooks, copiedHooks);
 
 	const helpersDir = join(root, ".githooks", "helpers");
-	const auditFile = join(root, ".ghjig", "state", AUDIT_FILE_NAME);
+	const auditFile = join(root, ".gitjig", "state", AUDIT_FILE_NAME);
 
 	const fixture: GithookFixture = { root, helpersDir, auditFile, seq: 0 };
 	git(fixture, ["-c", "init.defaultBranch=main", "init", "-q"]);
@@ -265,7 +265,7 @@ function finishRemoteSetup(fixture: GithookFixture, options: GithookRemoteOption
 		git(fixture, ["remote", "set-head", "origin", defaultBranch]);
 	}
 	if (danglingRemoteHead) {
-		git(fixture, ["--git-dir", remotePath, "symbolic-ref", "HEAD", "refs/heads/ghjig-absent-branch"]);
+		git(fixture, ["--git-dir", remotePath, "symbolic-ref", "HEAD", "refs/heads/gitjig-absent-branch"]);
 	}
 }
 
@@ -311,7 +311,7 @@ export function commitWithMessage(
 	appendFileSync(join(fixture.root, "work.txt"), `change ${fixture.seq}\n`);
 	git(fixture, ["add", "work.txt"]);
 
-	const messageFile = join(fixture.root, ".git", "GHJIG_TEST_MSG");
+	const messageFile = join(fixture.root, ".git", "GITJIG_TEST_MSG");
 	writeFileSync(messageFile, message);
 
 	const auditBefore = existsSync(fixture.auditFile) ? readFileSync(fixture.auditFile, "utf8") : "";

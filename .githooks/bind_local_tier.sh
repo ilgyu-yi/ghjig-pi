@@ -16,7 +16,7 @@
 #      activation is persistent and per-clone, so an ambient global or
 #      system value neither stands in for it nor blocks it, while the final
 #      verification also reads the EFFECTIVE value git actually resolves;
-#   2. ensures `.ghjig/` is version-control-invisible at creation: no write
+#   2. ensures `.gitjig/` is version-control-invisible at creation: no write
 #      when `git check-ignore` already answers (the committed anchor), else
 #      one line in the RESOLVED `git rev-parse --git-path info/exclude`
 #      (never the literal `.git/info/exclude`, which is not a path where
@@ -34,7 +34,7 @@
 # outrank, a local value this git cannot read at all, and an exclusion that
 # git still does not honor after the append. Re-running always heals
 # states this instrument created; it never overwrites what another writer
-# owns. This run writes nothing under `.ghjig/`: per-clone state there is
+# owns. This run writes nothing under `.gitjig/`: per-clone state there is
 # data the tier's own record writer creates when it first records (§4.2).
 #
 # This file is not hook-named, so git never executes it (SPEC §4.1's
@@ -337,8 +337,8 @@ do_bind() {
   # Exclusion at creation (§4.1, §5.5): the committed anchor answers on
   # every normal clone; the fallback writes the RESOLVED info/exclude.
   _bd_verified=' (core.hooksPath + exclusion)'
-  if git check-ignore -q -- .ghjig/state/audit.jsonl </dev/null 2>/dev/null; then
-    say 'exclusion: .ghjig/ is already version-control-invisible - no write.'
+  if git check-ignore -q -- .gitjig/state/audit.jsonl </dev/null 2>/dev/null; then
+    say 'exclusion: .gitjig/ is already version-control-invisible - no write.'
   else
     _bd_excl="$(git rev-parse --git-path info/exclude </dev/null 2>/dev/null)" || _bd_excl=""
     if [ -z "$_bd_excl" ]; then
@@ -411,15 +411,15 @@ do_bind() {
     #
     # The last byte is read through `od` rather than a command substitution,
     # which strips exactly the byte under test.
-    if LC_ALL=C grep -qxF '/.ghjig/' "$_bd_excl" 2>/dev/null; then
-      say 'exclusion: /.ghjig/ is already a line in the resolved info/exclude - no write.'
+    if LC_ALL=C grep -qxF '/.gitjig/' "$_bd_excl" 2>/dev/null; then
+      say 'exclusion: /.gitjig/ is already a line in the resolved info/exclude - no write.'
     else
       _bd_excl_last="$(tail -c 1 "$_bd_excl" 2>/dev/null | LC_ALL=C od -An -tu1 | LC_ALL=C tr -dc '0-9')"
       if [ -n "$_bd_excl_last" ] && [ "$_bd_excl_last" != "10" ]; then
         printf '\n' >> "$_bd_excl" || { warn 'bind_local_tier.sh: could not terminate the last line of the resolved info/exclude.'; return 2; }
       fi
-      printf '%s\n' '/.ghjig/' >> "$_bd_excl" || { warn 'bind_local_tier.sh: could not append the exclusion line.'; return 2; }
-      say 'exclusion: appended /.ghjig/ to the resolved info/exclude.'
+      printf '%s\n' '/.gitjig/' >> "$_bd_excl" || { warn 'bind_local_tier.sh: could not append the exclusion line.'; return 2; }
+      say 'exclusion: appended /.gitjig/ to the resolved info/exclude.'
     fi
     # The success line below names the exclusion as one of two verified
     # properties, so the append is MEASURED rather than assumed: git's own
@@ -431,10 +431,10 @@ do_bind() {
     # 128; the last means it could not answer, and refusing on an unanswered
     # question would turn this fix into a block on a clone this run has no
     # evidence against.
-    git check-ignore -q -- .ghjig/state/audit.jsonl </dev/null 2>/dev/null
+    git check-ignore -q -- .gitjig/state/audit.jsonl </dev/null 2>/dev/null
     _bd_ci_rc=$?
     if [ "$_bd_ci_rc" -eq 1 ]; then
-      warn "bind_local_tier.sh: the exclusion line is present in '$_bd_excl_shown', but git still reports .ghjig/ as not ignored, so the shell's own state would be visible to version control here. This clone is NOT verified bound. Re-run from the repository root once git ignores that path: $RE_ARM"
+      warn "bind_local_tier.sh: the exclusion line is present in '$_bd_excl_shown', but git still reports .gitjig/ as not ignored, so the shell's own state would be visible to version control here. This clone is NOT verified bound. Re-run from the repository root once git ignores that path: $RE_ARM"
       return 2
     fi
     # The success line names the exclusion only where this re-ask ANSWERED.

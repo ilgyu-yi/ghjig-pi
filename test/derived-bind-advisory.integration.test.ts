@@ -19,7 +19,7 @@
  *     surface."
  *
  * Drives real `pi` sessions through the hermetic harness (seam-rooted
- * state, §5.5) against the ghjig runtime linked from THIS repository's
+ * state, §5.5) against the gitjig runtime linked from THIS repository's
  * tree. Each fixture root is made a git repository carrying a copy of the
  * committed `.githooks/` tree and shaped into one binding state; the suite
  * then reads the session JSONL for the advisory entry type the runtime
@@ -42,7 +42,7 @@ import {
 	BIND_ADVISORY_ENTRY_TYPE,
 	BIND_REARM_COMMAND,
 	computeBindState,
-} from "../.pi/extensions/ghjig/bind-state.ts";
+} from "../.pi/extensions/gitjig/bind-state.ts";
 import {
 	buildFixture,
 	type Fixture,
@@ -57,11 +57,11 @@ import {
 const IS_WINDOWS = process.platform === "win32";
 
 /** The retired per-clone binding path — a file no surface reads. */
-const RETIRED_BINDING_REL = join(".ghjig", "shell-adapter.sh");
+const RETIRED_BINDING_REL = join(".gitjig", "shell-adapter.sh");
 
 const SCRIPT: ScriptTurn[] = [
-	{ kind: "toolCall", name: "bash", arguments: { command: "echo GHJIG_DERIVED_IT_RAN" } },
-	{ kind: "text", text: "GHJIG_DERIVED_IT_DONE" },
+	{ kind: "toolCall", name: "bash", arguments: { command: "echo GITJIG_DERIVED_IT_RAN" } },
+	{ kind: "text", text: "GITJIG_DERIVED_IT_DONE" },
 ];
 
 function envFor(home: string): Record<string, string> {
@@ -104,11 +104,11 @@ function diagnostics(result: PiRunResult): string {
 
 function requireRuntimeLoaded(fixture: Fixture, run: PiRunResult, arm: string): void {
 	const registrations = readSessionEntries(fixture).filter(
-		(entry) => entry.type === "custom" && entry.customType === "ghjig-registration",
+		(entry) => entry.type === "custom" && entry.customType === "gitjig-registration",
 	);
 	assert.ok(
 		registrations.length >= 1,
-		`${arm}: no ghjig-registration entry — the runtime never loaded, so every advisory or silence claim ` +
+		`${arm}: no gitjig-registration entry — the runtime never loaded, so every advisory or silence claim ` +
 			`here is vacuous\n${diagnostics(run)}`,
 	);
 }
@@ -125,7 +125,7 @@ before(async () => {
 	// and NOTHING sits at the retired binding path. This is what a bound
 	// clone of this repository is: the tier derives its own locations, so a
 	// per-clone binding file is no part of its bound state.
-	armedFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	armedFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(armedFixture);
 	runGit(armedFixture.root, armedFixture.homeDir, ["config", "core.hooksPath", ".githooks"]);
 	armedRun = await runPi(armedFixture);
@@ -134,10 +134,10 @@ before(async () => {
 	// repository's committed adapters. A marker-less file sits at the retired
 	// binding path, so nothing about this fixture can be satisfied by reading
 	// that file rather than the configuration.
-	foreignFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	foreignFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(foreignFixture);
 	mkdirSync(join(foreignFixture.root, "zqforeignhooks"));
-	mkdirSync(join(foreignFixture.root, ".ghjig"));
+	mkdirSync(join(foreignFixture.root, ".gitjig"));
 	writeFileSync(join(foreignFixture.root, RETIRED_BINDING_REL), "# zqforeign file at the retired path\n");
 	runGit(foreignFixture.root, foreignFixture.homeDir, [
 		"config",
@@ -149,7 +149,7 @@ before(async () => {
 	// 3) Armed, with the committed helper directory removed: a helper set the
 	// adapters cannot resolve degrades at the enforcement surface, on each
 	// folded arm, and is not a session-start state.
-	helpersGoneFixture = buildFixture({ script: SCRIPT, linkGhjigRuntime: true });
+	helpersGoneFixture = buildFixture({ script: SCRIPT, linkGitjigRuntime: true });
 	armGitRepo(helpersGoneFixture);
 	runGit(helpersGoneFixture.root, helpersGoneFixture.homeDir, ["config", "core.hooksPath", ".githooks"]);
 	rmSync(join(helpersGoneFixture.root, ".githooks", "helpers"), { recursive: true, force: true });
@@ -251,7 +251,7 @@ describe("the classifier resolves the configuration the consumer's git resolves 
 
 	/** A scratch repository carrying the committed .githooks, no local hooksPath. */
 	function scratchRepo(home: string): string {
-		const root = mkdtempSync(join(tmpdir(), "ghjig-xdg-repo-"));
+		const root = mkdtempSync(join(tmpdir(), "gitjig-xdg-repo-"));
 		runGit(root, home, ["-c", "init.defaultBranch=zqxdgmain", "init", "-q"]);
 		cpSync(join(repoRoot(), ".githooks"), join(root, ".githooks"), { recursive: true });
 		return root;
@@ -268,8 +268,8 @@ describe("the classifier resolves the configuration the consumer's git resolves 
 	}
 
 	it("a global binding the consumer's git does not read is not read by the classifier either", () => {
-		const home = mkdtempSync(join(tmpdir(), "ghjig-xdg-home-"));
-		const xdgElsewhere = mkdtempSync(join(tmpdir(), "ghjig-xdg-empty-"));
+		const home = mkdtempSync(join(tmpdir(), "gitjig-xdg-home-"));
+		const xdgElsewhere = mkdtempSync(join(tmpdir(), "gitjig-xdg-empty-"));
 		const root = scratchRepo(home);
 		try {
 			mkdirSync(join(home, ".config", "git"), { recursive: true });
@@ -295,8 +295,8 @@ describe("the classifier resolves the configuration the consumer's git resolves 
 	});
 
 	it("a binding homed under XDG_CONFIG_HOME classifies bound, not degraded", () => {
-		const home = mkdtempSync(join(tmpdir(), "ghjig-xdg-home2-"));
-		const xdg = mkdtempSync(join(tmpdir(), "ghjig-xdg-cfg-"));
+		const home = mkdtempSync(join(tmpdir(), "gitjig-xdg-home2-"));
+		const xdg = mkdtempSync(join(tmpdir(), "gitjig-xdg-cfg-"));
 		const root = scratchRepo(home);
 		try {
 			mkdirSync(join(xdg, "git"), { recursive: true });
@@ -335,7 +335,7 @@ describe("the classifier resolves the configuration the consumer's git resolves 
 describe("the classifier does not report bound where the adapters would not run (issue #68 AC5, SPEC §5.2)", { skip: IS_WINDOWS }, () => {
 	/** A scratch repository carrying the committed .githooks, bound at its own scope. */
 	function boundRepo(): string {
-		const root = mkdtempSync(join(tmpdir(), "ghjig-armverdict-"));
+		const root = mkdtempSync(join(tmpdir(), "gitjig-armverdict-"));
 		const home = join(root, "home");
 		mkdirSync(home, { recursive: true });
 		runGit(root, home, ["-c", "init.defaultBranch=zqverdictmain", "init", "-q"]);
@@ -415,7 +415,7 @@ describe("the classifier does not report bound where the adapters would not run 
 
 	it("a bound clone whose hooks directory escapes the repository is classified degraded", () => {
 		const root = boundRepo();
-		const outside = mkdtempSync(join(tmpdir(), "ghjig-armverdict-outside-"));
+		const outside = mkdtempSync(join(tmpdir(), "gitjig-armverdict-outside-"));
 		try {
 			assert.equal(
 				computeBindState(root),

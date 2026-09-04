@@ -6,7 +6,7 @@
  * tier-1 runtime under `.pi/extensions/`, the local tier under
  * `.githooks/` (including any file under `.githooks/helpers/`), and the
  * tier-3 instruments under `.github/workflows/` — with the one stated home,
- * `.pi/extensions/ghjig/postures.ts`, excluded. The roster is WALKED from
+ * `.pi/extensions/gitjig/postures.ts`, excluded. The roster is WALKED from
  * those three roots rather than enumerated per file, so a source added
  * tomorrow (a new helper, a new workflow) is scanned the day it lands and
  * cannot drift in unguarded (§3.10's structural-lock shape).
@@ -64,7 +64,7 @@ import { repoRoot } from "./harness/run-pi.ts";
 const ROOTS = [join(".pi", "extensions"), ".githooks", join(".github", "workflows")] as const;
 
 /** The one home §3.9 states; the only file excluded from the scan. */
-const INVENTORY_HOME = join(".pi", "extensions", "ghjig", "postures.ts");
+const INVENTORY_HOME = join(".pi", "extensions", "gitjig", "postures.ts");
 
 type SourceKind = "ts" | "hash";
 
@@ -133,7 +133,7 @@ describe("posture-inventory home lock (SPEC §3.9, issue #55)", () => {
 		const roster = rosterFiles();
 		assert.ok(
 			roster.includes(join(".githooks", "commit-msg")) &&
-				roster.includes(join(".pi", "extensions", "ghjig", "audit.ts")) &&
+				roster.includes(join(".pi", "extensions", "gitjig", "audit.ts")) &&
 				!roster.includes(INVENTORY_HOME) &&
 				roster.length >= 10,
 			`roster lost a known enforcement source or shrank below plausibility: ${JSON.stringify(roster, null, 2)}`,

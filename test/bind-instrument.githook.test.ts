@@ -8,7 +8,7 @@
  * byte-verified copy of THIS repository's `.githooks/` tree, driven as an
  * operator runs it, and the chain it arms measured only through `git
  * commit` (never a predicate directly). The record sink is the path the
- * tier DERIVES, `<top>/.ghjig/state/audit.jsonl` — exactly
+ * tier DERIVES, `<top>/.gitjig/state/audit.jsonl` — exactly
  * `resolveStateRoot()`'s root joined with `AUDIT_FILE_NAME` (§4.6) — which
  * is what `commitWithMessage`'s delta reads.
  *
@@ -59,7 +59,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { describe, it } from "node:test";
-import { appendAuditRecord } from "../.pi/extensions/ghjig/audit.ts";
+import { appendAuditRecord } from "../.pi/extensions/gitjig/audit.ts";
 import {
 	buildGithookFixture,
 	type CommitAttempt,
@@ -94,7 +94,7 @@ const AWS_PATTERN_ID = "aws-access-key-id";
 // ---------------------------------------------------------------------------
 
 function opSink(root: string): string {
-	return join(root, ".ghjig", "state", AUDIT_FILE_NAME);
+	return join(root, ".gitjig", "state", AUDIT_FILE_NAME);
 }
 
 function constructedEnv(root: string, extra: Record<string, string> = {}): Record<string, string> {
@@ -297,7 +297,7 @@ describe("a hostile-bytes repository root binds and fires (issue #68, SPEC §4.2
 	it("a root carrying quote, space, dollar and backtick binds, and the armed chain refuses a staged secret", () => {
 		// Dir name from codepoints (header note): "zqh '<quote>$d`t" —
 		// space, 0x27, 0x24, 0x60 all inside one path segment.
-		const base = mkdtempSync(join(tmpdir(), "ghjig-bindhostile-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-bindhostile-"));
 		const hostileName = "zqh " + cp(0x27) + cp(0x24) + "d" + cp(0x60) + "t";
 		const root = join(base, hostileName);
 		try {
@@ -370,7 +370,7 @@ describe("hooksPath foreign-value checks compare resolved values (issue #68, SPE
 function buildWorktreeSubstrate(withAnchor: boolean): { fixture: GithookFixture; wtRoot: string } {
 	const fixture = buildGithookFixture({});
 	if (withAnchor) {
-		writeFileSync(join(fixture.root, ".gitignore"), "/.ghjig/\n");
+		writeFileSync(join(fixture.root, ".gitignore"), "/.gitjig/\n");
 		fixtureGit(fixture, ["add", "--", ".gitignore"]);
 	}
 	fixtureGit(fixture, ["add", "--", ".githooks"]);
@@ -386,7 +386,7 @@ describe("exclusion at creation, both ways (issue #68 AC4, SPEC §4.1)", { skip:
 	it("with the .gitignore anchor present, the bind leaves info/exclude byte-identical", () => {
 		const fixture = buildGithookFixture({ unbound: true });
 		try {
-			writeFileSync(join(fixture.root, ".gitignore"), "/.ghjig/\n");
+			writeFileSync(join(fixture.root, ".gitignore"), "/.gitjig/\n");
 			const excludeFile = resolvedExcludePath(fixture.root);
 			const before = readOrNull(excludeFile);
 			requireInstrument(fixture.root);
@@ -406,16 +406,16 @@ describe("exclusion at creation, both ways (issue #68 AC4, SPEC §4.1)", { skip:
 		try {
 			requireInstrument(fixture.root);
 			assertBindSucceeded(runBind(fixture.root), "anchor absent");
-			const check = spawnSync("git", ["check-ignore", "-q", "--", join(".ghjig", "state", AUDIT_FILE_NAME)], {
+			const check = spawnSync("git", ["check-ignore", "-q", "--", join(".gitjig", "state", AUDIT_FILE_NAME)], {
 				cwd: fixture.root,
 				env: constructedEnv(fixture.root),
 				timeout: 30_000,
 			});
 			assert.equal(check.status, 0, "anchor absent: the record sink is not ignored after the bind");
 			assert.equal(
-				readFileSync(resolvedExcludePath(fixture.root), "utf8").includes(".ghjig"),
+				readFileSync(resolvedExcludePath(fixture.root), "utf8").includes(".gitjig"),
 				true,
-				"anchor absent: no .ghjig line in the resolved info/exclude",
+				"anchor absent: no .gitjig line in the resolved info/exclude",
 			);
 		} finally {
 			removeGithookFixture(fixture);
@@ -435,7 +435,7 @@ describe("exclusion at creation, both ways (issue #68 AC4, SPEC §4.1)", { skip:
 				"worktree substrate: .git is not a gitfile — the arm no longer measures the shape it names",
 			);
 			assertBindSucceeded(runBind(wtRoot), "worktree exclude fallback");
-			const check = spawnSync("git", ["check-ignore", "-q", "--", join(".ghjig", "state", AUDIT_FILE_NAME)], {
+			const check = spawnSync("git", ["check-ignore", "-q", "--", join(".gitjig", "state", AUDIT_FILE_NAME)], {
 				cwd: wtRoot,
 				env: constructedEnv(wtRoot),
 				timeout: 30_000,
@@ -443,9 +443,9 @@ describe("exclusion at creation, both ways (issue #68 AC4, SPEC §4.1)", { skip:
 			assert.equal(check.status, 0, "worktree exclude fallback: the record sink is not ignored after the bind");
 			const excludeFile = resolvedExcludePath(wtRoot);
 			assert.equal(
-				readFileSync(excludeFile, "utf8").includes(".ghjig"),
+				readFileSync(excludeFile, "utf8").includes(".gitjig"),
 				true,
-				`worktree exclude fallback: no .ghjig exclusion at the resolved ${excludeFile}`,
+				`worktree exclude fallback: no .gitjig exclusion at the resolved ${excludeFile}`,
 			);
 		} finally {
 			removeGithookFixture(fixture);
@@ -467,7 +467,7 @@ describe("exclusion at creation, both ways (issue #68 AC4, SPEC §4.1)", { skip:
 describe("the exclusion fallback refuses to write through a link (issue #68 AC4, SPEC §5.5)", { skip: IS_WINDOWS }, () => {
 	it("a symlinked info/exclude gains no append, and the run reports no bound state", () => {
 		const fixture = buildGithookFixture({ unbound: true });
-		const outside = mkdtempSync(join(tmpdir(), "ghjig-exclude-victim-"));
+		const outside = mkdtempSync(join(tmpdir(), "gitjig-exclude-victim-"));
 		try {
 			requireInstrument(fixture.root);
 			const victim = join(outside, "zqvictim.txt");
@@ -515,7 +515,7 @@ describe("the exclusion fallback refuses to write through a link (issue #68 AC4,
 			rmSync(dirname(excludeFile), { recursive: true, force: true });
 			assertBindSucceeded(runBind(fixture.root), "absent info/exclude");
 			assert.equal(
-				readFileSync(excludeFile, "utf8").includes(".ghjig"),
+				readFileSync(excludeFile, "utf8").includes(".gitjig"),
 				true,
 				"absent info/exclude: the fallback did not create and append the exclusion — the guard above " +
 					"turned the instrument's normal path into a false block",
@@ -665,7 +665,7 @@ describe("the instrument's write set is measured, not trusted (issue #68 AC4, SP
 				writeFileSync(join(fixture.root, "home", name), `# zqhome ${name} untouched\n`);
 			}
 			const excludeRel = relative(fixture.root, resolvedExcludePath(fixture.root));
-			// `.ghjig/**` is deliberately NOT allowed here: the arming run
+			// `.gitjig/**` is deliberately NOT allowed here: the arming run
 			// writes no per-clone artifact at all, and the record writer is
 			// what first materializes the namespace (§4.2).
 			const allowed = (entry: string): boolean =>
@@ -846,7 +846,7 @@ describe("the tier's record writer bounds its own writes (issue #68, SPEC §5.5)
 					"names what a repository's work touched, and a host may carry accounts that work never " +
 					"concerned (§5.5)",
 			);
-			for (const created of [join(fixture.root, ".ghjig"), join(fixture.root, ".ghjig", "state")]) {
+			for (const created of [join(fixture.root, ".gitjig"), join(fixture.root, ".gitjig", "state")]) {
 				assert.equal(
 					(statSync(created).mode & 0o777).toString(8),
 					"700",
@@ -863,7 +863,7 @@ describe("the tier's record writer bounds its own writes (issue #68, SPEC §5.5)
 	it("concurrent bash and Node appends interleave by whole lines only, at a record size inside the single-append bound (mixed-writer sink bound)", async () => {
 		const fixture = buildGithookFixture({});
 		try {
-			const stateRoot = join(fixture.root, ".ghjig", "state");
+			const stateRoot = join(fixture.root, ".gitjig", "state");
 			mkdirSync(stateRoot, { recursive: true });
 			const sink = opSink(fixture.root);
 			const linesBefore = existsSync(sink)
@@ -989,21 +989,21 @@ describe("a sourced file's own `exit` folds the hook to allow (issue #68, SPEC �
 // ---------------------------------------------------------------------------
 
 describe("the derived sink stays writable and refuses an object it did not create (issue #68, SPEC §4.6, §5.5)", { skip: IS_WINDOWS }, () => {
-	it("a refusal after .ghjig/state is removed re-creates a traversable dir and lands the block record", () => {
+	it("a refusal after .gitjig/state is removed re-creates a traversable dir and lands the block record", () => {
 		const fixture = buildArmedScanFixture();
 		try {
 			stageFile(fixture, "zqumaskseed.txt", AWS_SECRET + "\n");
 			commitWithMessage(fixture, "chore: seed the state directory\n");
 			fixtureGit(fixture, ["reset", "-q", "--", "zqumaskseed.txt"]);
 			rmSync(join(fixture.root, "zqumaskseed.txt"), { force: true });
-			rmSync(join(fixture.root, ".ghjig", "state"), { recursive: true, force: true });
+			rmSync(join(fixture.root, ".gitjig", "state"), { recursive: true, force: true });
 
 			stageFile(fixture, "zqumaskleak.txt", AWS_SECRET + "\n");
 			const attempt = commitWithMessage(fixture, "chore: exercise the state-dir umask arm\n");
 			assert.notEqual(attempt.status, 0, "state-dir umask: the staged secret passed — the armed chain did not fire");
 			assert.doesNotThrow(
-				() => accessSync(join(fixture.root, ".ghjig", "state"), constants.X_OK),
-				"state-dir umask: the re-created .ghjig/state has no search bit — a directory created under " +
+				() => accessSync(join(fixture.root, ".gitjig", "state"), constants.X_OK),
+				"state-dir umask: the re-created .gitjig/state has no search bit — a directory created under " +
 					"the file-append umask silently loses every subsequent append and read (§4.6)",
 			);
 			assert.match(
@@ -1348,7 +1348,7 @@ describe("the arming verdict is refused where the adapters would not run (issue 
 
 	it("a .githooks directory that resolves outside the repository does not report a verified bound state", () => {
 		const fixture = buildGithookFixture({ unbound: true });
-		const outside = mkdtempSync(join(tmpdir(), "ghjig-escaped-hooks-"));
+		const outside = mkdtempSync(join(tmpdir(), "gitjig-escaped-hooks-"));
 		try {
 			requireInstrument(fixture.root);
 			assertBindSucceeded(runBind(fixture.root), "in-repository control");

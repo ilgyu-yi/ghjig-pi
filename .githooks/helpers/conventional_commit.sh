@@ -30,7 +30,7 @@
 # refusing the actor's own input (§3.9's measurement rule). Degradation of
 # the enforcement chain around this file — binding, helper file, delegated
 # function — is the adapters' fail-open business (`githook_source`,
-# `githook_require`), inventoried at `.pi/extensions/ghjig/postures.ts`,
+# `githook_require`), inventoried at `.pi/extensions/gitjig/postures.ts`,
 # never re-decided here.
 
 # Parsing runs under byte semantics (LC_ALL=C) so globs, lengths, and
@@ -44,13 +44,13 @@ check_commit_subject() {
 
 	local _cc_lc_set="${LC_ALL+x}" _cc_lc_val="${LC_ALL-}" _cc_status=0
 	export LC_ALL=C
-	_ghjig_cc_check "${1-}" "$_cc_charmap" "$_cc_lc_val" "${LC_CTYPE-}" "${LANG-}" || _cc_status=$?
+	_gitjig_cc_check "${1-}" "$_cc_charmap" "$_cc_lc_val" "${LC_CTYPE-}" "${LANG-}" || _cc_status=$?
 	if [ "$_cc_lc_set" = "x" ]; then LC_ALL="$_cc_lc_val"; else unset LC_ALL; fi
 	return "$_cc_status"
 }
 
-# _ghjig_cc_check <line> <charmap> <caller-LC_ALL> <caller-LC_CTYPE> <caller-LANG>
-_ghjig_cc_check() {
+# _gitjig_cc_check <line> <charmap> <caller-LC_ALL> <caller-LC_CTYPE> <caller-LANG>
+_gitjig_cc_check() {
 	local _cc_line="$1" _cc_charmap="$2" _cc_subject
 	local _cc_re_required='^(feat|fix|docs|refactor|perf)\(#[0-9]+\)(!)?: (.*)$'
 	local _cc_re_optional='^(test|style|build|ci|chore|revert)(\(#[0-9]+\))?(!)?: (.*)$'
@@ -65,7 +65,7 @@ _ghjig_cc_check() {
 	fi
 
 	local _cc_length
-	_cc_length="$(_ghjig_cc_measure "$_cc_subject" "$_cc_charmap" "$3" "$4" "$5")" || return 1
+	_cc_length="$(_gitjig_cc_measure "$_cc_subject" "$_cc_charmap" "$3" "$4" "$5")" || return 1
 
 	if [ "$_cc_length" -lt 1 ] || [ "$_cc_length" -gt 72 ]; then
 		printf 'commit-format: subject measures %s codepoints, outside 1..72\n' "$_cc_length" >&2
@@ -74,10 +74,10 @@ _ghjig_cc_check() {
 	return 0
 }
 
-# _ghjig_cc_measure <subject> <charmap> <caller-LC_ALL> <caller-LC_CTYPE> <caller-LANG>
+# _gitjig_cc_measure <subject> <charmap> <caller-LC_ALL> <caller-LC_CTYPE> <caller-LANG>
 # Prints the codepoint count, or refuses (arm-named cause to stderr, no
 # stdout) — the two outcomes, nothing else. Runs under LC_ALL=C.
-_ghjig_cc_measure() {
+_gitjig_cc_measure() {
 	local _cc_subject="$1" _cc_charmap="$2"
 
 	# Pure ASCII (no byte outside 0x01-0x7F; NUL cannot enter a shell

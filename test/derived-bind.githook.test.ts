@@ -22,7 +22,7 @@
  * by `buildGithookFixture` — copying `helpers/*.sh` alone drops the
  * extensionless `helpers/secret-patterns` and every measured allow becomes
  * meaningless. Fixtures mint their own state; no arm reads this clone's own
- * `.ghjig/`.
+ * `.gitjig/`.
  *
  * Environment constraints (sibling-suite doctrine): secret material is BUILT
  * FROM CODEPOINTS, `zq…` markers guard every byte-level assertion, every
@@ -59,7 +59,7 @@ const AWS_SECRET = AKIA + "IOSFODNN7EXAMPLE";
 const AWS_PATTERN_ID = "aws-access-key-id";
 
 /** The retired per-clone binding path — a file the instrument no longer writes. */
-const RETIRED_BINDING_REL = join(".ghjig", "shell-adapter.sh");
+const RETIRED_BINDING_REL = join(".gitjig", "shell-adapter.sh");
 
 // ---------------------------------------------------------------------------
 // Substrate helpers.
@@ -174,7 +174,7 @@ function readOrNull(path: string): Buffer | null {
 
 /** Everything under the shell's own untracked namespace, or `[]` where it is absent. */
 function namespaceEntries(root: string): string[] {
-	return existsSync(join(root, ".ghjig")) ? listTreeEntries(join(root, ".ghjig")).sort() : [];
+	return existsSync(join(root, ".gitjig")) ? listTreeEntries(join(root, ".gitjig")).sort() : [];
 }
 
 function stageFile(fixture: GithookFixture, name: string, content: string): void {
@@ -210,7 +210,7 @@ describe("one run arms a fresh clone and writes no per-clone code (issue #68 AC1
 
 			const porcelain = gitOut(fixture.root, ["status", "--porcelain"]);
 			assert.equal(
-				porcelain.split("\n").some((line) => line.includes(".ghjig")),
+				porcelain.split("\n").some((line) => line.includes(".gitjig")),
 				false,
 				`fresh clone: the shell's untracked namespace is visible to version control — it is excluded at ` +
 					`creation (§4.1, §5.5): ${porcelain}`,
@@ -226,7 +226,7 @@ describe("one run arms a fresh clone and writes no per-clone code (issue #68 AC1
 			assert.equal(
 				refused.auditDelta.includes(AWS_PATTERN_ID),
 				true,
-				`fresh clone: the record at .ghjig/state/${AUDIT_FILE_NAME} does not name pattern ` +
+				`fresh clone: the record at .gitjig/state/${AUDIT_FILE_NAME} does not name pattern ` +
 					`'${AWS_PATTERN_ID}' (§3.3, §4.6): ${JSON.stringify(refused.auditDelta)}`,
 			);
 			assert.equal(
@@ -376,7 +376,7 @@ describe("a foreign hooks path is never overwritten (issue #68 AC3, SPEC §4.7)"
 			assert.deepEqual(
 				namespaceEntries(fixture.root),
 				[],
-				`foreign local hooks path: the refused run left state under .ghjig/ — the run that refuses to ` +
+				`foreign local hooks path: the refused run left state under .gitjig/ — the run that refuses to ` +
 					`take another writer's target writes nothing of its own (§4.7)`,
 			);
 		} finally {
@@ -419,7 +419,7 @@ describe("a foreign hooks path is never overwritten (issue #68 AC3, SPEC §4.7)"
 			assert.deepEqual(
 				namespaceEntries(fixture.root),
 				[],
-				`worktree scope: the refused run left state under .ghjig/ — a run that reports no verified bound ` +
+				`worktree scope: the refused run left state under .gitjig/ — a run that reports no verified bound ` +
 					`state leaves no per-clone artifact behind it (§4.7)`,
 			);
 		} finally {
@@ -506,20 +506,20 @@ describe("the exclusion the success line claims is re-measured after the append 
 		const fixture = buildFreshClone();
 		try {
 			requireInstrument(fixture.root);
-			writeFileSync(join(fixture.root, ".gitignore"), "!/.ghjig/\n");
+			writeFileSync(join(fixture.root, ".gitignore"), "!/.gitjig/\n");
 			fixtureGit(fixture, ["add", "--", ".gitignore"]);
 			fixtureGit(fixture, ["commit", "--no-verify", "-q", "-m", "chore: a rule outranking info/exclude"]);
 
 			// Same-run control: the fallback path really is the live one here, so
 			// the run below reaches the append this arm is about.
 			assert.equal(
-				spawnSync("git", ["check-ignore", "-q", "--", ".ghjig/state/audit.jsonl"], {
+				spawnSync("git", ["check-ignore", "-q", "--", ".gitjig/state/audit.jsonl"], {
 					cwd: fixture.root,
 					env: constructedEnv(fixture.root),
 					timeout: 30_000,
 				}).status,
 				1,
-				"exclusion re-measure: the fixture already ignores .ghjig/, so the run takes the no-write fast path " +
+				"exclusion re-measure: the fixture already ignores .gitjig/, so the run takes the no-write fast path " +
 					"and this arm measures nothing",
 			);
 
@@ -529,10 +529,10 @@ describe("the exclusion the success line claims is re-measured after the append 
 				run.output.includes("bound: verified"),
 				false,
 				`exclusion re-measure: the run reported a verified bound state while git still does not ignore ` +
-					`.ghjig/ — the success line names an exclusion that does not hold (§4.1): ${run.output}`,
+					`.gitjig/ — the success line names an exclusion that does not hold (§4.1): ${run.output}`,
 			);
 			assert.equal(
-				spawnSync("git", ["check-ignore", "-q", "--", ".ghjig/state/audit.jsonl"], {
+				spawnSync("git", ["check-ignore", "-q", "--", ".gitjig/state/audit.jsonl"], {
 					cwd: fixture.root,
 					env: constructedEnv(fixture.root),
 					timeout: 30_000,
@@ -577,9 +577,9 @@ describe("the exclusion append reads info/exclude as line-oriented (issue #68 AC
 				"unterminated rule: git does not honour the fixture's rule to begin with, so this arm measures nothing",
 			);
 			assert.equal(
-				gitStatus(fixture.root, ["check-ignore", "-q", "--", ".ghjig/state/audit.jsonl"]),
+				gitStatus(fixture.root, ["check-ignore", "-q", "--", ".gitjig/state/audit.jsonl"]),
 				1,
-				"unterminated rule: the clone already ignores .ghjig/, so the run takes the no-write fast path and " +
+				"unterminated rule: the clone already ignores .gitjig/, so the run takes the no-write fast path and " +
 					"never reaches the append this arm is about",
 			);
 
@@ -606,15 +606,15 @@ describe("the exclusion append reads info/exclude as line-oriented (issue #68 AC
 		const fixture = buildFreshClone();
 		try {
 			requireInstrument(fixture.root);
-			writeFileSync(join(fixture.root, ".gitignore"), "!/.ghjig/\n");
+			writeFileSync(join(fixture.root, ".gitignore"), "!/.gitjig/\n");
 			fixtureGit(fixture, ["add", "--", ".gitignore"]);
 			fixtureGit(fixture, ["commit", "--no-verify", "-q", "-m", "chore: a rule outranking info/exclude"]);
 			// Control: the fallback really is the live path here, so each run
 			// below reaches the append and the refusal that prescribes the next.
 			assert.equal(
-				gitStatus(fixture.root, ["check-ignore", "-q", "--", ".ghjig/state/audit.jsonl"]),
+				gitStatus(fixture.root, ["check-ignore", "-q", "--", ".gitjig/state/audit.jsonl"]),
 				1,
-				"re-run accumulation: the fixture already ignores .ghjig/, so no run reaches the append",
+				"re-run accumulation: the fixture already ignores .gitjig/, so no run reaches the append",
 			);
 
 			const excludePath = resolvedExcludePath(fixture.root);
@@ -624,11 +624,11 @@ describe("the exclusion append reads info/exclude as line-oriented (issue #68 AC
 
 			const appended = readFileSync(excludePath, "utf8")
 				.split("\n")
-				.filter((line) => line === "/.ghjig/");
+				.filter((line) => line === "/.gitjig/");
 			assert.equal(
 				appended.length,
 				1,
-				`re-run accumulation: the resolved info/exclude carries ${appended.length} '/.ghjig/' lines after ` +
+				`re-run accumulation: the resolved info/exclude carries ${appended.length} '/.gitjig/' lines after ` +
 					`three runs — the refusal prescribes the re-run, so the growth is by instruction (§4.7 ` +
 					`safe-to-repeat): ${JSON.stringify(readFileSync(excludePath, "utf8"))}`,
 			);

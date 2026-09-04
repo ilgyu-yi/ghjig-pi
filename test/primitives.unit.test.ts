@@ -1,7 +1,7 @@
 /**
  * Unit suite for the tier-1 runtime primitives (issue #32).
  *
- * Imports the runtime modules from this repository's `.pi/extensions/ghjig/`
+ * Imports the runtime modules from this repository's `.pi/extensions/gitjig/`
  * tree directly. Contracts under test:
  *
  *   - audit.ts    — one JSON object per line; free text encoded at write
@@ -76,14 +76,14 @@ import {
 	recoveryFor,
 	sinkRefusal,
 	writeRecordLine,
-} from "../.pi/extensions/ghjig/audit.ts";
-import { locateRepoRoot, locateRepoRootFrom } from "../.pi/extensions/ghjig/locate.ts";
-import { POSTURES } from "../.pi/extensions/ghjig/postures.ts";
-import { resolveStateRoot } from "../.pi/extensions/ghjig/state-root.ts";
+} from "../.pi/extensions/gitjig/audit.ts";
+import { locateRepoRoot, locateRepoRootFrom } from "../.pi/extensions/gitjig/locate.ts";
+import { POSTURES } from "../.pi/extensions/gitjig/postures.ts";
+import { resolveStateRoot } from "../.pi/extensions/gitjig/state-root.ts";
 
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..");
-const SEAM = "GHJIG_TEST_STATE_ROOT";
-const DECOY_VARS = ["GHJIG_ROOT", "GHJIG_STATE_ROOT", "GHJIG_PI_ROOT", "PI_STATE_ROOT"] as const;
+const SEAM = "GITJIG_TEST_STATE_ROOT";
+const DECOY_VARS = ["GITJIG_ROOT", "GITJIG_STATE_ROOT", "GITJIG_PI_ROOT", "PI_STATE_ROOT"] as const;
 const MANAGED_VARS = [SEAM, ...DECOY_VARS];
 
 let savedEnv: Record<string, string | undefined>;
@@ -125,7 +125,7 @@ describe("audit primitive: one-line encoded records (§5.5)", () => {
 	let root: string;
 
 	before(() => {
-		root = mkdtempSync(join(tmpdir(), "ghjig-audit-"));
+		root = mkdtempSync(join(tmpdir(), "gitjig-audit-"));
 		appendAuditRecord(root, { category: "test", action: "first", text: NASTY_TEXT });
 		appendAuditRecord(root, { category: "test", action: "second", text: "plain" });
 	});
@@ -313,8 +313,8 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// inside the fixture: the arm below stages one and asserts the guard
 		// refuses it, then asserts it still admits an ordinary path the
 		// fixture does own — a guard that refuses everything contains nothing.
-		const fixture = mkdtempSync(join(tmpdir(), "ghjig-guard-fixture-"));
-		const outside = mkdtempSync(join(tmpdir(), "ghjig-guard-outside-"));
+		const fixture = mkdtempSync(join(tmpdir(), "gitjig-guard-fixture-"));
+		const outside = mkdtempSync(join(tmpdir(), "gitjig-guard-outside-"));
 		try {
 			const precious = join(outside, "precious");
 			writeFileSync(precious, "a file no arm of this suite may reach");
@@ -344,7 +344,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// here because that reach argument is a property of today's only
 		// caller, and the mirror-image precondition on `locateRepoRootFrom`
 		// was closed on exactly this reasoning.
-		const elsewhere = mkdtempSync(join(tmpdir(), "ghjig-audit-cwd-"));
+		const elsewhere = mkdtempSync(join(tmpdir(), "gitjig-audit-cwd-"));
 		const savedCwd = process.cwd();
 		try {
 			process.chdir(elsewhere);
@@ -375,7 +375,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	it("leaves a symlink's target untouched: the record lands at the audit path itself (§4.6)", () => {
 		// Write-target equals read-target: a link planted at the sink path must
 		// not send the evidence somewhere the consuming gate never reads.
-		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-link-"));
+		const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-link-"));
 		try {
 			const elsewhere = join(stateRoot, "elsewhere");
 			mkdirSync(elsewhere);
@@ -402,7 +402,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// comment 1, measured on PR #42's head). The property the sink needs
 		// is that the opened inode carries exactly one name: `nlink === 1`,
 		// answered by `fstat` on the descriptor the open already returned.
-		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-hardlink-"));
+		const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-hardlink-"));
 		try {
 			const elsewhere = join(stateRoot, "elsewhere");
 			mkdirSync(elsewhere);
@@ -436,7 +436,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// process under this arm's OWN bound — the issue's AC has the arm
 		// carry its bound rather than lean on the suite's — so the red run
 		// terminates: red is the child killed at the bound, no verdict printed.
-		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-fifo-"));
+		const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-fifo-"));
 		execFileSync("mkfifo", [join(stateRoot, AUDIT_FILE_NAME)]);
 		const boundMs = 4000;
 		const script = [
@@ -454,7 +454,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 					"-e",
 					script,
 					stateRoot,
-					pathToFileURL(join(REPO_ROOT, ".pi", "extensions", "ghjig", "audit.ts")).href,
+					pathToFileURL(join(REPO_ROOT, ".pi", "extensions", "gitjig", "audit.ts")).href,
 				],
 				{ timeout: boundMs, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
 			);
@@ -490,7 +490,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// default this arm would pass on any machine whose umask already masks
 		// group and other, without the writer ever declaring a mode — the
 		// vacuous pass the mode contract exists to rule out.
-		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-mode-"));
+		const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-mode-"));
 		const savedUmask = process.umask(0o000);
 		try {
 			appendAuditRecord(stateRoot, INPUT);
@@ -519,7 +519,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// suffices), so the refusal is owed a live recovery naming the exact
 		// act: `chmod 600` on the sink.
 		for (const mode of [0o644, 0o666]) {
-			const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-loose-mode-"));
+			const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-loose-mode-"));
 			try {
 				const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
 				writeFileSync(sinkPath, "");
@@ -557,7 +557,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// a regular 0600 file owned by this account, so the opened inode
 		// fails nothing but `nlink`, and a green here with the check deleted
 		// is impossible.
-		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-hardlink-0600-"));
+		const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-hardlink-0600-"));
 		try {
 			const elsewhere = join(stateRoot, "elsewhere");
 			mkdirSync(elsewhere);
@@ -641,7 +641,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// A verdict that refuses everything contains nothing: the counterpart
 		// of the /dev/null pin is that the Stats of a sink the append just
 		// created — regular, one name, 0600, this account — pass it.
-		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-verdict-pass-"));
+		const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-verdict-pass-"));
 		try {
 			assert.equal(captureWarnings(() => appendAuditRecord(stateRoot, INPUT)).value, true);
 			const fd = openSync(join(stateRoot, AUDIT_FILE_NAME), constants.O_RDONLY);
@@ -662,7 +662,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	});
 
 	it("names a recovery in the degraded-append signal (§3.11)", () => {
-		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-signal-"));
+		const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-signal-"));
 		try {
 			const { warnings } = captureWarnings(() =>
 				appendAuditRecord(join(stateRoot, "no-such-dir", "deeper"), INPUT),
@@ -681,7 +681,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// creates the destination the signal names and appends again. A signal
 		// naming a recovery that does not restore the trail is worse than one
 		// naming none.
-		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-recovery-"));
+		const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-recovery-"));
 		try {
 			const missing = join(stateRoot, "no-such-dir", "deeper");
 			const { warnings } = captureWarnings(() => appendAuditRecord(missing, INPUT));
@@ -708,17 +708,17 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 	});
 
 	it("names a live recovery when an ancestor of the destination is a plain file (§3.11)", () => {
-		// `<repo>/.ghjig` existing as a file is an honest mistake, not a hostile
+		// `<repo>/.gitjig` existing as a file is an honest mistake, not a hostile
 		// one, so this arm is owed a live recovery. Nothing can be created
 		// beneath a plain file, so a clause naming the sink path prescribes an
 		// act the operator cannot perform: the live object is the non-directory
 		// component. The arm performs the clause on exactly the path the clause
 		// names — replacing it with a directory — and never repairs that path
 		// toward the one it was hoping for.
-		const base = mkdtempSync(join(tmpdir(), "ghjig-audit-notdir-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-audit-notdir-"));
 		try {
-			writeFileSync(join(base, ".ghjig"), "a file where a directory was meant");
-			const stateRoot = join(base, ".ghjig", "state");
+			writeFileSync(join(base, ".gitjig"), "a file where a directory was meant");
+			const stateRoot = join(base, ".gitjig", "state");
 			const { warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
 			const clause = recoveryClause(warnings[0] ?? "");
 			const named = clause === undefined ? undefined : pathNamedIn(clause);
@@ -753,11 +753,11 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 					? "the directory mode refuses nothing for this account"
 					: false,
 	}, () => {
-		// `.ghjig/state` created with restrictive permissions is an honest
+		// `.gitjig/state` created with restrictive permissions is an honest
 		// mistake. The sink does not exist and cannot be created, so a clause
 		// naming the sink prescribes an act on an object that is not there; the
 		// live object is the directory's mode.
-		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-refuse-"));
+		const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-refuse-"));
 		try {
 			chmodSync(stateRoot, 0o500);
 			const { value, warnings } = captureWarnings(() => appendAuditRecord(stateRoot, INPUT));
@@ -798,7 +798,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// this shape is unmodelled and belongs to the general arm. Without the
 		// guard that keeps the destination-mode arm off it, the EACCES code
 		// alone would select the dead clause.
-		const base = mkdtempSync(join(tmpdir(), "ghjig-audit-unsearchable-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-audit-unsearchable-"));
 		const blocked = join(base, "blocked");
 		mkdirSync(blocked);
 		const stateRoot = join(blocked, "state");
@@ -831,7 +831,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// only the sink's own mode refuses. The live object is that file, and a
 		// clause naming the directory would prescribe a chmod that changes
 		// nothing — while asserting an absence the file sitting there denies.
-		const stateRoot = mkdtempSync(join(tmpdir(), "ghjig-audit-sinkmode-"));
+		const stateRoot = mkdtempSync(join(tmpdir(), "gitjig-audit-sinkmode-"));
 		const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
 		try {
 			writeFileSync(sinkPath, "");
@@ -870,7 +870,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// The comparison object is the general arm's own output, taken from a
 		// code it is the arm for; matching it means the operator is told to make
 		// the sink a plain writable file, which for all four it already is.
-		const stateRoot = join(tmpdir(), "ghjig-audit-delayed-write");
+		const stateRoot = join(tmpdir(), "gitjig-audit-delayed-write");
 		const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
 		const general = recoveryFor({ code: "ENOTAROUTEDCODE" }, stateRoot, sinkPath);
 		for (const code of ["ENOSPC", "EDQUOT", "EROFS", "EIO"]) {
@@ -891,7 +891,7 @@ describe("audit primitive: the sink is the path the gate reads (§4.6, §5.5)", 
 		// same object (room for the record) and are right to share a clause.
 		// Clauses are compared to each other, never to expected text, so the
 		// arm pins the routing and not the wording.
-		const stateRoot = join(tmpdir(), "ghjig-audit-delayed-write");
+		const stateRoot = join(tmpdir(), "gitjig-audit-delayed-write");
 		const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
 		const groups = [
 			{ object: "room for the record on the filesystem", codes: ["ENOSPC", "EDQUOT"] },
@@ -952,7 +952,7 @@ describe("audit primitive: the record write is all-or-raise (§3.12)", () => {
 		// Nothing here can park: both ends are opened O_NONBLOCK, the reader
 		// end first because a write-only open on a FIFO with no reader fails
 		// ENXIO, and no arm ever waits on the pipe.
-		const dir = mkdtempSync(join(tmpdir(), "ghjig-audit-writeall-"));
+		const dir = mkdtempSync(join(tmpdir(), "gitjig-audit-writeall-"));
 		const fifo = join(dir, "sink.fifo");
 		execFileSync("mkfifo", [fifo]);
 		const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
@@ -1002,18 +1002,18 @@ describe("audit primitive: the record write is all-or-raise (§3.12)", () => {
 describe("state-root resolution matrix (§5.5, §4.6)", () => {
 	it("computes the operational path under the repo root when no seam is set", () => {
 		const resolved = resolveStateRoot();
-		assert.deepEqual(resolved, { root: join(REPO_ROOT, ".ghjig", "state"), seamActive: false });
+		assert.deepEqual(resolved, { root: join(REPO_ROOT, ".gitjig", "state"), seamActive: false });
 	});
 
 	it("creates nothing when no seam is set (resolution only, no operational-root creation)", () => {
-		const operational = join(REPO_ROOT, ".ghjig", "state");
+		const operational = join(REPO_ROOT, ".gitjig", "state");
 		const existedBefore = existsSync(operational);
 		resolveStateRoot();
 		assert.equal(existsSync(operational), existedBefore);
 	});
 
 	it("returns the seam target with seamActive: true when the seam is set", () => {
-		const seamDir = mkdtempSync(join(tmpdir(), "ghjig-seam-"));
+		const seamDir = mkdtempSync(join(tmpdir(), "gitjig-seam-"));
 		try {
 			process.env[SEAM] = seamDir;
 			assert.deepEqual(resolveStateRoot(), { root: seamDir, seamActive: true });
@@ -1045,12 +1045,12 @@ describe("state-root resolution matrix (§5.5, §4.6)", () => {
 		);
 		process.env[SEAM] = "relative/state-root";
 		assert.throws(() => resolveStateRoot(), recovery, "the relative-seam arm prescribes no fix");
-		process.env[SEAM] = join(tmpdir(), "ghjig-no-such-seam-target");
+		process.env[SEAM] = join(tmpdir(), "gitjig-no-such-seam-target");
 		assert.throws(() => resolveStateRoot(), recovery, "the missing-target arm prescribes no fix");
 	});
 
 	it("refuses an unusable seam target (existing regular file) instead of falling back", () => {
-		const seamDir = mkdtempSync(join(tmpdir(), "ghjig-seam-"));
+		const seamDir = mkdtempSync(join(tmpdir(), "gitjig-seam-"));
 		const filePath = join(seamDir, "a-file");
 		writeFileSync(filePath, "not a directory");
 		try {
@@ -1081,7 +1081,7 @@ describe("state-root resolution matrix (§5.5, §4.6)", () => {
 		// EACCES escape factory scope without this module's recovery — would
 		// keep the row green. The refusal is staged where §3.12 allows it to
 		// be: an unsearchable ancestor, the same device the audit side uses.
-		const base = mkdtempSync(join(tmpdir(), "ghjig-seam-refused-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-seam-refused-"));
 		const blocked = join(base, "blocked");
 		mkdirSync(blocked);
 		const target = join(blocked, "state");
@@ -1105,7 +1105,7 @@ describe("state-root resolution matrix (§5.5, §4.6)", () => {
 	});
 
 	it("creates nothing under the operational root on a refusal", () => {
-		const operational = join(REPO_ROOT, ".ghjig", "state");
+		const operational = join(REPO_ROOT, ".gitjig", "state");
 		const existedBefore = existsSync(operational);
 		process.env[SEAM] = "relative/state-root";
 		try {
@@ -1119,9 +1119,9 @@ describe("state-root resolution matrix (§5.5, §4.6)", () => {
 
 describe("locate: cwd-independence and decoy-env immunity (§4.6)", () => {
 	function buildDecoyTree(): string {
-		const decoy = mkdtempSync(join(tmpdir(), "ghjig-decoy-"));
+		const decoy = mkdtempSync(join(tmpdir(), "gitjig-decoy-"));
 		mkdirSync(join(decoy, ".pi", "extensions"), { recursive: true });
-		mkdirSync(join(decoy, ".ghjig", "state"), { recursive: true });
+		mkdirSync(join(decoy, ".gitjig", "state"), { recursive: true });
 		writeFileSync(join(decoy, ".pi", "extensions", "look-alike.ts"), "// decoy\n");
 		return decoy;
 	}
@@ -1165,7 +1165,7 @@ describe("locate: cwd-independence and decoy-env immunity (§4.6)", () => {
 				process.env[name] = decoy;
 			}
 			assert.deepEqual(resolveStateRoot(), {
-				root: join(REPO_ROOT, ".ghjig", "state"),
+				root: join(REPO_ROOT, ".gitjig", "state"),
 				seamActive: false,
 			});
 		} finally {
@@ -1175,10 +1175,10 @@ describe("locate: cwd-independence and decoy-env immunity (§4.6)", () => {
 });
 
 describe("locate: candidate admissibility bound (§4.7)", () => {
-	/** Lays out an install shape `<root>/<prefix>/.pi/extensions/ghjig/locate.ts`. */
+	/** Lays out an install shape `<root>/<prefix>/.pi/extensions/gitjig/locate.ts`. */
 	function installTree(prefix: string): { root: string; moduleFile: string; installDir: string } {
-		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
-		const installDir = join(root, prefix, ".pi", "extensions", "ghjig");
+		const root = mkdtempSync(join(tmpdir(), "gitjig-install-"));
+		const installDir = join(root, prefix, ".pi", "extensions", "gitjig");
 		mkdirSync(installDir, { recursive: true });
 		const moduleFile = join(installDir, "locate.ts");
 		writeFileSync(moduleFile, "// stand-in for the installed module\n");
@@ -1207,7 +1207,7 @@ describe("locate: candidate admissibility bound (§4.7)", () => {
 		// evidence sink into the install tree — the outcome the bound exists to
 		// prevent (§4.7), reached through the prefix collision §4.6 forbids
 		// from mis-scoping in either direction.
-		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
+		const root = mkdtempSync(join(tmpdir(), "gitjig-install-"));
 		try {
 			mkdirSync(join(root, ".pi"));
 			const below = join(root, "..z");
@@ -1229,7 +1229,7 @@ describe("locate: candidate admissibility bound (§4.7)", () => {
 	});
 
 	it("still accepts a .pi/ ancestor above the install root (upper bound unmoved)", () => {
-		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
+		const root = mkdtempSync(join(tmpdir(), "gitjig-install-"));
 		try {
 			mkdirSync(join(root, ".pi"));
 			const deep = join(root, "x", "nested", "a", "b");
@@ -1244,7 +1244,7 @@ describe("locate: candidate admissibility bound (§4.7)", () => {
 	});
 
 	it("degrades open to the structural root when no admissible .pi/ ancestor exists (§3.9)", () => {
-		const root = mkdtempSync(join(tmpdir(), "ghjig-install-"));
+		const root = mkdtempSync(join(tmpdir(), "gitjig-install-"));
 		try {
 			const deep = join(root, "x", "nested", "a", "b");
 			mkdirSync(deep, { recursive: true });
@@ -1283,7 +1283,7 @@ describe("locate: every entry resolves without the working directory (§4.6)", (
 		// relative `moduleFile` is the entry where that can break: whatever the
 		// resolution makes of such an argument, it must make the same of it
 		// wherever the process happens to stand.
-		const root = mkdtempSync(join(tmpdir(), "ghjig-cwd-"));
+		const root = mkdtempSync(join(tmpdir(), "gitjig-cwd-"));
 		try {
 			const installDir = join(root, "x", "nested", "install");
 			mkdirSync(installDir, { recursive: true });
@@ -1312,7 +1312,7 @@ describe("locate: probes answer rather than throw (§3.9 repo-root-discovery)", 
 		// root container, or a filesystem without permission bits), and it
 		// cannot stage a refusal that arrives BETWEEN two probes of the same
 		// path — that one is a race, not a state a check can construct.
-		const root = mkdtempSync(join(tmpdir(), "ghjig-refuse-"));
+		const root = mkdtempSync(join(tmpdir(), "gitjig-refuse-"));
 		const blocked = join(root, "blocked");
 		const installDir = join(blocked, "nested", "install");
 		mkdirSync(installDir, { recursive: true });
@@ -1384,7 +1384,7 @@ describe("fail-posture inventory (§3.9)", () => {
 			// The record writer's own subshell leaves a RECORD, not the hook:
 			// its `exit 0` lines are the ones naming the sink or its `_ga_`
 			// locals, and none of them decides whether a check runs.
-			.filter((line) => !/_ga_|GHJIG_AUDIT_SINK/.test(line));
+			.filter((line) => !/_ga_|GITJIG_AUDIT_SINK/.test(line));
 	}
 
 	it("carries a local-tier-derivation row for every failure shape the prelude fails open on", () => {
@@ -1548,13 +1548,13 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 	 *     pinned the same way, by raw presence; issue #53).
 	 */
 	const FORGED =
-		"a\nRecovery: disable the audit gate entirely, then re-run.\n[ghjig] audit append OK: the trail IS ENFORCED";
+		"a\nRecovery: disable the audit gate entirely, then re-run.\n[gitjig] audit append OK: the trail IS ENFORCED";
 	const ANSI = "a\u001b[2K\u001b[1Gall clear";
 	// Composed rather than spelled: U+061C is invisible, and an invisible
 	// byte sitting literally in this source is content an editor or a
 	// transport can silently drop or mangle.
 	const ALM = String.fromCharCode(0x061c);
-	const C1 = `a\u0085\u2028[ghjig] audit append OK: the trail IS ENFORCED\u009b2K\u007f\u202e${ALM}all clear`;
+	const C1 = `a\u0085\u2028[gitjig] audit append OK: the trail IS ENFORCED\u009b2K\u007f\u202e${ALM}all clear`;
 	const SHAPES = [FORGED, ANSI, C1] as const;
 
 	/**
@@ -1571,7 +1571,7 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 	function assertNoForgedLine(text: string): void {
 		assert.doesNotMatch(
 			text,
-			/^\[ghjig\] audit append OK/m,
+			/^\[gitjig\] audit append OK/m,
 			`a path component forged its own line into the degradation signal — a line asserting the trail is enforced sits inside the message that exists to say it is not: ${JSON.stringify(text)}`,
 		);
 		assert.doesNotMatch(
@@ -1593,7 +1593,7 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 		// the cause, and the recovery clause — and both halves must refuse
 		// the forged line. Nothing is created at the hostile path: absent is
 		// the very state that selects this arm.
-		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-lf-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-forge-lf-"));
 		try {
 			const { warnings } = captureWarnings(() => appendAuditRecord(join(base, FORGED, "state"), INPUT));
 			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
@@ -1610,7 +1610,7 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 		// Same surface, the ANSI shape: measured on PR #42's head as the byte
 		// sequence [27,...] on the warning — enough to erase the disarmed-gate
 		// line on any terminal that renders it.
-		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-ansi-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-forge-ansi-"));
 		try {
 			const { warnings } = captureWarnings(() => appendAuditRecord(join(base, ANSI, "state"), INPUT));
 			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
@@ -1627,7 +1627,7 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 		// on the text they emit. EACCES is staged separately below — its
 		// guard probes the state root on disk.
 		for (const shape of SHAPES) {
-			const stateRoot = join(tmpdir(), "ghjig-forge-recovery", shape);
+			const stateRoot = join(tmpdir(), "gitjig-forge-recovery", shape);
 			const sinkPath = join(stateRoot, AUDIT_FILE_NAME);
 			for (const code of ["ENOENT", "ENOTDIR", "ENOSPC", "EDQUOT", "EROFS", "EIO", "EUNMODELLED"]) {
 				assertNoForgedLine(recoveryFor({ code }, stateRoot, sinkPath));
@@ -1641,7 +1641,7 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 		// The EACCES arm fires only when the state root measures as a
 		// directory, so this is the one recovery arm whose hostile fixture
 		// must really exist on disk.
-		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-eacces-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-forge-eacces-"));
 		try {
 			for (const shape of SHAPES) {
 				const stateRoot = join(base, shape);
@@ -1664,7 +1664,7 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 		// real /dev/null Stats (type, mode and owner all fail) and the
 		// chmod-600 branch off a real loose-mode file this account owns
 		// (mode is all that fails).
-		const base = mkdtempSync(join(tmpdir(), "ghjig-forge-verdict-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-forge-verdict-"));
 		try {
 			const statsOf = (path: string): Stats => {
 				const fd = openSync(path, constants.O_RDONLY);
@@ -1698,9 +1698,9 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 		// actor the bound defends against (issue #47) — so the fixture
 		// stages a hostile-named install root with a planted .pi below it.
 		for (const shape of SHAPES) {
-			const base = mkdtempSync(join(tmpdir(), "ghjig-forge-locate-"));
+			const base = mkdtempSync(join(tmpdir(), "gitjig-forge-locate-"));
 			try {
-				const installDir = join(base, shape, ".pi", "extensions", "ghjig");
+				const installDir = join(base, shape, ".pi", "extensions", "gitjig");
 				mkdirSync(installDir, { recursive: true });
 				const moduleFile = join(installDir, "locate.ts");
 				writeFileSync(moduleFile, "// stand-in for the installed module\n");
@@ -1720,7 +1720,7 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 		// answers absent, so the hostile bytes ride the moduleFile argument
 		// into the warning without any directory entry on disk.
 		for (const shape of SHAPES) {
-			const moduleFile = join(tmpdir(), "ghjig-forge-missing", shape, "nested", "a", "b", "locate.ts");
+			const moduleFile = join(tmpdir(), "gitjig-forge-missing", shape, "nested", "a", "b", "locate.ts");
 			const { warnings } = captureWarnings(() => locateRepoRootFrom(moduleFile));
 			assert.equal(warnings.length, 1, `expected one degradation warning, got ${JSON.stringify(warnings)}`);
 			assert.match(warnings[0], /repo-root discovery failed/);
@@ -1756,7 +1756,7 @@ describe("degradation surfaces carry no forged line and no control byte (§3.9, 
 				},
 			);
 			// Absolute but absent → the unusable arm; nothing is created.
-			process.env[SEAM] = join(tmpdir(), "ghjig-forge-seam", shape);
+			process.env[SEAM] = join(tmpdir(), "gitjig-forge-seam", shape);
 			assert.throws(
 				() => resolveStateRoot(),
 				(error: unknown) => {
@@ -1826,7 +1826,7 @@ describe("command-context recovery clauses are substitution-dead when pasted (is
 	it("the mode arm's chmod clause repairs its literal object without executing a substitution-shaped component", {
 		skip: process.platform === "win32" ? "POSIX shell paste" : false,
 	}, () => {
-		const base = mkdtempSync(join(tmpdir(), "ghjig-paste-chmod-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-paste-chmod-"));
 		try {
 			// The literal hostile path really exists — the fs calls take the
 			// name verbatim — with the loose mode that selects the chmod arm:
@@ -1865,7 +1865,7 @@ describe("command-context recovery clauses are substitution-dead when pasted (is
 		// — so the pasteable unit under test is the delimited path operand,
 		// in argument position after the rm the prose tells the operator to
 		// run. That operand is exactly where the substitution rides.
-		const base = mkdtempSync(join(tmpdir(), "ghjig-paste-remove-"));
+		const base = mkdtempSync(join(tmpdir(), "gitjig-paste-remove-"));
 		try {
 			const sinkPath = join(base, SUBSTITUTION, AUDIT_FILE_NAME);
 			mkdirSync(dirname(sinkPath));

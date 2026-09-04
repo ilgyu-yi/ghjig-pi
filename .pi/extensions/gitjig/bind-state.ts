@@ -142,7 +142,7 @@ function readGatedFile(path: string, cap: number): Buffer {
 	try {
 		const stat = fstatSync(fd);
 		if (!stat.isFile() || stat.size > cap) {
-			throw new Error("ghjig: refused a session-start read path that is not a plain regular file inside its cap");
+			throw new Error("gitjig: refused a session-start read path that is not a plain regular file inside its cap");
 		}
 		return readFileSync(fd);
 	} finally {
@@ -154,7 +154,7 @@ function readGatedFile(path: string, cap: number): Buffer {
 export const BIND_REARM_COMMAND = "bash .githooks/bind_local_tier.sh";
 
 /** The session-entry type the advisory rides (the harness-readable surface). */
-export const BIND_ADVISORY_ENTRY_TYPE = "ghjig-bind-advisory";
+export const BIND_ADVISORY_ENTRY_TYPE = "gitjig-bind-advisory";
 
 /**
  * States that surface one advisory each (§5.2): no hooks path configured
@@ -177,7 +177,7 @@ export type BindState = (typeof DEGRADED_STATES)[number] | (typeof SILENT_STATES
  * finds it false retires the surface (§3.11's dead-recovery rule).
  */
 function degradedMessage(state: BindState): string {
-	return `ghjig bind state: ${state}; run \`${BIND_REARM_COMMAND}\` from the repository root`;
+	return `gitjig bind state: ${state}; run \`${BIND_REARM_COMMAND}\` from the repository root`;
 }
 
 /**

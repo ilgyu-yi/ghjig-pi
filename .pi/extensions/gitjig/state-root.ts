@@ -1,12 +1,12 @@
 /**
  * State-root resolution — RESOLUTION ONLY (SPEC §5.5, §4.6).
  *
- * With no seam set, the operational root `<repo>/.ghjig/state/` is
+ * With no seam set, the operational root `<repo>/.gitjig/state/` is
  * computed and returned without creating anything: operational-root
  * creation lands with the first operational writer (§6.1
  * build-as-consumed), not here.
  *
- * The single override seam `GHJIG_TEST_STATE_ROOT` is the only
+ * The single override seam `GITJIG_TEST_STATE_ROOT` is the only
  * environment variable the runtime reads anywhere; the name marks it
  * test-only, and an active seam is reported (`seamActive: true`) so the
  * entry can announce it (§5.9).
@@ -40,7 +40,7 @@ import { locateRepoRoot } from "./locate.ts";
 import { quoted } from "./quote.ts";
 
 /** The single test-only override seam — the runtime's only env read. */
-export const STATE_SEAM = "GHJIG_TEST_STATE_ROOT";
+export const STATE_SEAM = "GITJIG_TEST_STATE_ROOT";
 
 export interface StateRootResolution {
 	/** Absolute path of the state root; nothing under it is created here. */
@@ -70,18 +70,18 @@ function isDirectory(path: string): boolean {
 export function resolveStateRoot(): StateRootResolution {
 	const seam = process.env[STATE_SEAM];
 	if (seam === undefined) {
-		return { root: join(locateRepoRoot(), ".ghjig", "state"), seamActive: false };
+		return { root: join(locateRepoRoot(), ".gitjig", "state"), seamActive: false };
 	}
 	if (!isAbsolute(seam)) {
 		throw new Error(
-			`[ghjig] ${STATE_SEAM} is set but not an absolute path ` +
+			`[gitjig] ${STATE_SEAM} is set but not an absolute path ` +
 				`(${seam === "" ? "empty value" : quoted(seam)}): refusing the run — ` +
 				`no fallback toward the operational state root (§3.9, §5.5). ${RECOVERY}`,
 		);
 	}
 	if (!isDirectory(seam)) {
 		throw new Error(
-			`[ghjig] ${STATE_SEAM} is set but unusable (${quoted(seam)} is not a directory this account can ` +
+			`[gitjig] ${STATE_SEAM} is set but unusable (${quoted(seam)} is not a directory this account can ` +
 				`measure — missing, not a directory, or refused): ` +
 				`refusing the run — no fallback toward the operational state root (§3.9, §5.5). ${RECOVERY}`,
 		);

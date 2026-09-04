@@ -441,7 +441,7 @@ export function recoveryFor(error: unknown, stateRoot: string, writePath: string
  */
 function warnDegraded(cause: string, recovery: string): void {
 	console.warn(
-		`[ghjig] audit append failed: no audit evidence is being recorded for this run — ` +
+		`[gitjig] audit append failed: no audit evidence is being recorded for this run — ` +
 			`the audit trail is NOT ENFORCED. Degrading open rather than blocking (§3.9). ` +
 			`Cause: ${cause}. ` +
 			`Recovery: ${recovery}`,
