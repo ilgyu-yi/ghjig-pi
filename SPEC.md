@@ -53,18 +53,18 @@ This document is the repository's behavioural SSOT: every enforced norm, gate cl
 | &nbsp;&nbsp;§4.6 | Binding and resolution | 527 |
 | &nbsp;&nbsp;§4.7 | Host boundary | 537 |
 | &nbsp;&nbsp;§4.8 | The command layer | 545 |
-| §5 | Cross-cutting contracts | 594 |
-| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 598 |
-| &nbsp;&nbsp;§5.2 | Graceful degradation | 602 |
-| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 606 |
-| &nbsp;&nbsp;§5.4 | Work language | 610 |
-| &nbsp;&nbsp;§5.5 | State boundary | 614 |
-| &nbsp;&nbsp;§5.6 | Operating modes | 620 |
-| &nbsp;&nbsp;§5.7 | Unattended conduct | 630 |
-| &nbsp;&nbsp;§5.8 | Context lifecycle | 640 |
-| &nbsp;&nbsp;§5.9 | Session surfaces | 648 |
-| §6 | Self-governance milestone | 656 |
-| &nbsp;&nbsp;§6.1 | Substrate posture | 667 |
+| §5 | Cross-cutting contracts | 602 |
+| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 606 |
+| &nbsp;&nbsp;§5.2 | Graceful degradation | 610 |
+| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 614 |
+| &nbsp;&nbsp;§5.4 | Work language | 618 |
+| &nbsp;&nbsp;§5.5 | State boundary | 622 |
+| &nbsp;&nbsp;§5.6 | Operating modes | 628 |
+| &nbsp;&nbsp;§5.7 | Unattended conduct | 638 |
+| &nbsp;&nbsp;§5.8 | Context lifecycle | 648 |
+| &nbsp;&nbsp;§5.9 | Session surfaces | 656 |
+| §6 | Self-governance milestone | 664 |
+| &nbsp;&nbsp;§6.1 | Substrate posture | 675 |
 <!-- TOC END -->
 
 ## 0. Intent and scope
@@ -327,7 +327,7 @@ This section states the first-class design constraint — pi provides no built-i
 
 ### 3.2 The three tiers
 
-**Tier 1 — in-process substrate gates.** pi extensions, loaded from the repository's extension directory, subscribe to the substrate's tool-call events and can **block** a call (returning a reason the agent observes) or **mutate** its input before execution; they can register commands — what may ride that registration, and on which surface, is §4.8; the capability is no license to home a gate's predicate in a command (§3.11) — receive session-lifecycle events, and persist state across a session. All five behaviors were probed and verified against the pinned substrate environment — the spike note on issue #4 is the evidence record. Constraints observed there bind tier-1 implementations: extension factories must not invoke action methods at load time (register work in session-start handlers instead); headless invocation requires an explicit end-of-input on stdin and an explicit project-trust flag; a scripted provider requires a placeholder endpoint value; and the scripted-provider pattern is the designated **hermetic test substrate** — tier-1 gates are testable without network or model access. This tier is in-session mistake prevention: it narrows the loop for agent-driven work but is not a security boundary.
+**Tier 1 — in-process substrate gates.** pi extensions, loaded from the repository's extension directory, subscribe to the substrate's tool-call events and can **block** a call (returning a reason the agent observes) or **mutate** its input before execution; they can register commands, receive session-lifecycle events, and persist state across a session. What may ride that registration, and on which surface, is §4.8; the capability is no license to home a gate's predicate in a command (§3.11). All five behaviors were probed and verified against the pinned substrate environment — the spike note on issue #4 is the evidence record. Constraints observed there bind tier-1 implementations: extension factories must not invoke action methods at load time (register work in session-start handlers instead); headless invocation requires an explicit end-of-input on stdin and an explicit project-trust flag; a scripted provider requires a placeholder endpoint value; and the scripted-provider pattern is the designated **hermetic test substrate** — tier-1 gates are testable without network or model access. This tier is in-session mistake prevention: it narrows the loop for agent-driven work but is not a security boundary.
 
 **Tier 2 — the local git-hook tier.** The committed `.githooks/` adapters (`pre-commit`, `pre-push`, `commit-msg`) bind any local git operation — human, script, or any agent harness — once a clone activates them (`core.hooksPath=.githooks`). This is an **advice tier**: it folds to `--no-verify` by design, and a clone that has not activated the hooks path no-ops rather than wedging git. The adapters carry no check logic; they delegate through the contract declared in `.githooks/_lib.sh`, which carries the tier's own runtime — the helper-source primitive and the audit-record writer (§5.5) — as committed code and **derives** the two locations the tier needs: the helper directory from its own installed position (§4.1), and the state root from the repository top the hook is running against (§4.6). What the tier sources is what stands at that derived position in the working tree, committed or not. The derivation is bounded by one refusal, taken over the adapter position alone: where the repository top discovered from the running adapter's own installed position is not the top of the repository the operation runs against, the tier runs no check and says so on stderr — a tier that resolved its checks outside the repository it was invoked in would write its records there too, across the boundary §5.5 draws. Two residuals ride that bound and are enumerated in place (§3.11) rather than closed. The helper directory is appended to the adapter position after the refusal is taken and is itself neither resolved nor re-tested, so a `helpers` component linked out of the repository is sourced and executed with no refusal on any surface. And a refusal that lives inside a hook speaks only where a hook runs: under the relative `core.hooksPath` the bind instrument writes, an operation git resolves against a caller-named work tree finds no hooks directory there, runs no adapter, and reaches none of this. The delegated checks are branch guarding, staged-secret scanning, and commit-subject grammar. A present-but-incomplete helper degrades to allow, never to a false block — and the fold is **arm-ordered**: an adapter sources each arm's helper immediately before that arm runs, so a helper failure degrades that arm and every arm after it; an arm that has already run and decided is never undone. On the push surface the adapter calls its predicate once per ref line git streams on stdin, so a delegated check reads no stdin of its own: a check that consumes stdin removes ref lines from the iteration, and the arm then measures fewer refs than the push carries with nothing to show for the difference. A clone arms this tier through the committed bind instrument `.githooks/bind_local_tier.sh`: one idempotent run activates `core.hooksPath`, excludes the untracked state directory from version control at creation (§4.1), and verifies the effective bound state before reporting it (§4.7); the session surface's bind advisory (§5.2, §5.9) names any degraded binding state and that exact command.
 
@@ -557,9 +557,9 @@ A **command asset** is a committed artifact the substrate registers as an invoca
 
 Returning more than one surface is unreachable **by construction** — first-match-wins is a property of the form the rungs take, not a claim about a table that could be found inconsistent — and rung 4 is the returns-none disposition, so the boundary is total in four dispositions.
 
-**The rung-2 disposition.** Rung 2 reads a property of the **surface**, never of an asset's frontmatter: only the skill surface carries a model-advertisement channel at all. A skill may declare `disable-model-invocation`, which drops that advertisement while leaving the asset in the command list unchanged — so the declaration is an *output* of having selected that surface, never an input the rule reads. The residual, enumerated here rather than instrumented: an asset can therefore nullify its own rung-2 justification, and the rule does not detect it.
+**The rung-2 disposition.** Rung 2 reads a property of the **surface**, never of an asset's frontmatter: among the system-prompt inputs rendered below, a `skills` key carries the loaded skill set and no prompt-template or extension-command counterpart appears among those keys, so the model-advertisement channel is skill-surface-only. What that run does **not** reach is what any asset-level declaration does to the channel downstream of that input: the fixture's `disable-model-invocation` skill is still carried in the `skills` entries, so this SPEC states no effect for that declaration and reads none. The residual, enumerated here rather than instrumented, is a property of the rule's own shape: the rung is asked once, over surface capacity, and no asset property is re-read afterward — so an asset whose own content or frontmatter later cut the model reach that justified rung 2 would leave the rule's answer standing, undetected.
 
-**Worked cases**, applied in place — never a membership list this section keeps and the tree drifts from. `work-on`: no, no, yes → prompt template. `review`: yes at rung 1 — §1.6's blind compare resolves a head the caller never reveals and §1.4's round count is caller-derived, both acts that must not be contingent on a model's cooperation — and the same handler places the reviewer's instructions, so one surface both acts and instructs. `ship`: yes at rung 1 (the merge act) and also yes at rung 2 (an unattended run reaches it unnamed, §5.6, §5.7) — the ordering is what makes the answer exactly one. Both extension-command cases are **call sites** of the predicates §3.3's `merge-review` and `ac-closeout` rows already own, never second implementations of them (§3.11).
+**Worked cases**, applied in place — never a membership list this section keeps and the tree drifts from. `work-on`: no, no, yes → prompt template. `review`: yes at rung 1 — §1.6's blind compare resolves a head the caller never reveals and §1.4's round count is caller-derived, both acts that must not be contingent on a model's cooperation — and the same handler places the reviewer's instructions, so one surface both acts and instructs. `ship`: yes at rung 1 (the merge act) and also yes at rung 2 (an unattended run reaches it unnamed, §5.6, §5.7) — the ordering is what makes the answer exactly one. What ordering does **not** do is carry the second yes onto the returned surface, and that residual is enumerated here rather than closed: the system-prompt inputs rendered below carry no extension-command counterpart to the `skills` key, so the channel rung 2 reads is not one the returned surface supplies. Whether an extension command can reach the model by some other route is **not** established here, and the section claims no such negative: the same inputs are mutable from an extension, so an absence among their keys is not an absence of every route. Both extension-command cases are **call sites** of the predicates §3.3's `merge-review` and `ac-closeout` rows already own, never second implementations of them (§3.11).
 
 **No split.** A command that must both act and instruct takes rung 1 and is not split across two surfaces: a split mints two homes and two canonical names for one asset (§2.7, §3.11), and the substrate does not require it — one handler does both.
 
@@ -571,21 +571,29 @@ Returning more than one surface is unreachable **by construction** — first-mat
 
 **The layer-absent residual.** Without the layer, what is lost is the **performance** of the procedural norms, never their enforcement: tiers 2–3 hold in full, being indifferent to whether any command asset exists, and what binds in the layer's absence is the procedural obligation on whoever composes the act. This is the operator-surface counterpart of the residual §3.4 names today only for the classes §3.3 homes at tier 1.
 
-**What was measured.** The registration surfaces above are recorded from one run against **pi 0.84.3** on 2026-09-04, in a throwaway fixture with `HOME` isolated so a reader's own global assets add no rows and cannot produce a false drift signal. The fixture carried two extension commands registering one name (`.pi/extensions/alpha.ts`, `.pi/extensions/beta.ts`), three skills (`.pi/skills/hidden/SKILL.md`, declaring `disable-model-invocation`; the bare root `.pi/skills/bareroot.md`; `.pi/skills/ship/SKILL.md`), one project skill outside the governed home (`.agents/skills/grp/agentsskill/SKILL.md`), and two prompt templates (`.pi/prompts/work-on.md`, `.pi/prompts/skill:ship.md`). The registered command list, with `<FX>` the fixture root and the inline built-in's name and path redacted per §5.1 — the redaction touches neither of the two fields that row is read for:
+**What was measured.** The registration surfaces above, and the system-prompt inputs the rung-2 disposition reads, are recorded from **one** run against **pi 0.84.3** on 2026-09-05, in a throwaway fixture with `HOME` isolated so a reader's own global assets add no rows and cannot produce a false drift signal. The fixture carried two extension commands registering one name (`.pi/extensions/alpha.ts`, `.pi/extensions/beta.ts`), three skills (`.pi/skills/hidden/SKILL.md`, declaring `disable-model-invocation`; the bare root `.pi/skills/bareroot.md`; `.pi/skills/ship/SKILL.md`), one project skill outside the governed home (`.agents/skills/grp/agentsskill/SKILL.md`), and two prompt templates (`.pi/prompts/work-on.md`, `.pi/prompts/skill:ship.md`); a probe extension dumps the registered command list at `session_start` (`CMD` rows) and the system-prompt inputs at `before_agent_start` (`ADV` rows). Two hand edits are made to the block below and to nothing else: `<FX>` stands for the fixture root, and the inline built-in's name is redacted per §5.1 — the redaction touches neither of the two fields that row is read for.
 
 ```
-CMD name=dup:1 source=extension scope=project baseDir=<FX>/.pi path=<FX>/.pi/extensions/alpha.ts
-CMD name=dup:2 source=extension scope=project baseDir=<FX>/.pi path=<FX>/.pi/extensions/beta.ts
-CMD name=<redacted> source=extension scope=temporary baseDir=- path=<inline:redacted>
-CMD name=skill:agentsskill source=skill scope=project baseDir=<FX>/.agents path=<FX>/.agents/skills/grp/agentsskill/SKILL.md
-CMD name=skill:bareroot source=skill scope=project baseDir=<FX>/.pi path=<FX>/.pi/skills/bareroot.md
-CMD name=skill:hidden source=skill scope=project baseDir=<FX>/.pi path=<FX>/.pi/skills/hidden/SKILL.md
-CMD name=skill:ship source=prompt scope=project baseDir=<FX>/.pi path=<FX>/.pi/prompts/skill:ship.md
-CMD name=skill:ship source=skill scope=project baseDir=<FX>/.pi path=<FX>/.pi/skills/ship/SKILL.md
-CMD name=work-on source=prompt scope=project baseDir=<FX>/.pi path=<FX>/.pi/prompts/work-on.md
+$ cd <FX> && env -i PATH="$PATH" HOME=<FX>/home PI_CODING_AGENT_DIR=<FX>/pi-agent PI_OFFLINE=1 \
+    pi -p go -a --session-dir <FX>/sessions --provider scripted --model scripted-model \
+    < /dev/null 2>&1 | grep -E '^(CMD|ADV)' | sort
+ADV skills entry=agentsskill
+ADV skills entry=bareroot
+ADV skills entry=hidden
+ADV skills entry=ship
+ADV systemPromptOptions keys=appendSystemPrompt,contextFiles,customPrompt,cwd,promptGuidelines,selectedTools,skills,toolSnippets
+CMD name=dup:1 source=extension scope=project baseDir=<FX>/.pi
+CMD name=dup:2 source=extension scope=project baseDir=<FX>/.pi
+CMD name=<redacted> source=extension scope=temporary baseDir=-
+CMD name=skill:agentsskill source=skill scope=project baseDir=<FX>/.agents
+CMD name=skill:bareroot source=skill scope=project baseDir=<FX>/.pi
+CMD name=skill:hidden source=skill scope=project baseDir=<FX>/.pi
+CMD name=skill:ship source=prompt scope=project baseDir=<FX>/.pi
+CMD name=skill:ship source=skill scope=project baseDir=<FX>/.pi
+CMD name=work-on source=prompt scope=project baseDir=<FX>/.pi
 ```
 
-The readings those rows carry: the reported `source` (`extension` | `prompt` | `skill`) is the only surface discriminator; `.pi/skills/` discovers both `<name>/SKILL.md` and a bare root `.md` (`skill:bareroot`); a project skill's reported name is `skill:<name>`; `baseDir` discriminates the governed home from the non-`.pi/` project skill home while `scope` reads `project` for both, and the inline built-in reports `temporary` scope with no `baseDir`. Collisions are silent in all three shapes measured — within-extension (`dup:1`/`dup:2`, both kept in load order, the bare name unreachable); cross-surface (`skill:ship` appears twice, once `prompt` and once `skill`, with no de-duplication and no suffix); and a skill declaring `disable-model-invocation` (`skill:hidden`) staying in the list unchanged — which is what puts the uniqueness obligation above on the shell.
+The readings those rows carry: the reported `source` (`extension` | `prompt` | `skill`) is the only surface discriminator; `.pi/skills/` discovers both `<name>/SKILL.md` and a bare root `.md` (`skill:bareroot`); a project skill's reported name is `skill:<name>`; `baseDir` discriminates the governed home from the non-`.pi/` project skill home while `scope` reads `project` for both, and the inline built-in reports `temporary` scope with no `baseDir`. No collision raised an error in the three shapes measured — within-extension (`dup:1`/`dup:2`, both kept and no row carrying the bare name); cross-surface (`skill:ship` appears twice, once `prompt` and once `skill`, with no de-duplication and no suffix); and a skill declaring `disable-model-invocation` (`skill:hidden`) staying in the list unchanged — which is what puts the uniqueness obligation above on the shell.
 
 **Drift.** A substrate whose registration shape no longer matches that record reads as **cannot measure**, never as a pass (§3.9). The instrument that re-proves the shape per run derives later per §1.2's macro-phase clause — the idiom §3.12 and §6.1 already use — and homes with the substrate harness at `test/harness/run-pi.ts`, which already pins a substrate failure class at a named version and re-proves it on every run. The home is named as a **path** and never as a line range: a line range in the living set owes present-truth and goes stale on any edit above it (§2.5).
 

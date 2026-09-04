@@ -1,6 +1,7 @@
 /**
  * Structural suite for the command-layer section (issue #78, Directive #77;
- * SPEC §4.8 "The command layer" and the six sites that point at it).
+ * SPEC §4.8 "The command layer" and the sites amended to point at it — the
+ * subset this suite binds is the one arms 3–6 name).
  *
  * Subject under test: the TEXT of `SPEC.md`. The change under test appends
  * `### 4.8 The command layer` after §4.7 and amends the sites whose
