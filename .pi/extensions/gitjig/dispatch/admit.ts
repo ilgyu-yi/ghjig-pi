@@ -17,7 +17,7 @@
  * caller from the run shape; junk, partial, and wrong-stream land on the
  * two return-side causes here.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 
 /** The return bound — beyond it the return is refused whole (§4.9). */
 export const RETURN_LIMIT_BYTES = 64 * 1024;
@@ -43,12 +43,25 @@ export type ReturnAdmission =
 const SCHEMA_KEYS = new Set(["ok", "summary", "reviewedHead"]);
 
 export function admitReturn(returnPath: string): ReturnAdmission {
+	// The bound is enforced on the stat BEFORE any read: an unstattable
+	// return is missing, an oversize one is malformed — decided without
+	// pulling the oversize bytes into memory.
+	let size: number;
+	try {
+		size = statSync(returnPath).size;
+	} catch {
+		return { admitted: false, cause: REFUSAL_CAUSES.missingReturn };
+	}
+	if (size > RETURN_LIMIT_BYTES) {
+		return { admitted: false, cause: REFUSAL_CAUSES.malformedReturn };
+	}
 	let raw: Buffer;
 	try {
 		raw = readFileSync(returnPath);
 	} catch {
 		return { admitted: false, cause: REFUSAL_CAUSES.missingReturn };
 	}
+	// Backstop for a return grown between the stat and the read.
 	if (raw.byteLength > RETURN_LIMIT_BYTES) {
 		return { admitted: false, cause: REFUSAL_CAUSES.malformedReturn };
 	}

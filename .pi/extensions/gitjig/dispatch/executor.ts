@@ -19,7 +19,11 @@
  * the FLUSH, deciding from what has arrived when "close" never comes
  * (§5.9's hung-dependency terms). A spawn failure surfaces as
  * `spawnFailed` so the caller can refuse on §3.10's delegate-absent
- * class rather than conflate it with a failed run.
+ * class rather than conflate it with a failed run. The child is spawned
+ * detached and the bound kills its whole process group. Named residual
+ * (§3.11): a double-forked, re-setsid'd grandchild survives any group
+ * kill on this platform and inherits the passthrough environment —
+ * named, not claimed closed.
  */
 import { spawn } from "node:child_process";
 import type { DispatchContext } from "./provision.ts";
@@ -58,14 +62,29 @@ export function runDelegate(
 		};
 		const child = spawn(argv[0], argv.slice(1), {
 			cwd: context.treeDir,
+			// Detached: the child leads its own process group, so the bound's
+			// kill reaches delegate-spawned children too, not the child alone.
+			detached: true,
 			// Passthrough with the one seam rebound (§5.5): nothing else about
 			// the parent environment is edited.
 			env: { ...process.env, GITJIG_TEST_STATE_ROOT: context.stateDir },
 			stdio: ["ignore", "pipe", "pipe"],
 		});
+		let spawned = false;
+		child.on("spawn", () => {
+			spawned = true;
+		});
 		const killTimer = setTimeout(() => {
 			timedOut = true;
-			child.kill("SIGKILL");
+			if (typeof child.pid === "number") {
+				try {
+					process.kill(-child.pid, "SIGKILL");
+				} catch {
+					child.kill("SIGKILL");
+				}
+			} else {
+				child.kill("SIGKILL");
+			}
 		}, options.timeoutMs ?? DEFAULT_RUN_BOUND_MS);
 		let graceTimer: ReturnType<typeof setTimeout> | undefined;
 		const decide = (code: number | null): void => {
@@ -77,7 +96,12 @@ export function runDelegate(
 		};
 		child.on("error", () => {
 			clearTimeout(killTimer);
-			settle({ exitCode: null, timedOut, spawnFailed: true });
+			if (graceTimer !== undefined) {
+				clearTimeout(graceTimer);
+			}
+			// Delegate-absent iff the child never started: a post-spawn error
+			// is a run that ran, decided as a failed run, never as absence.
+			settle({ exitCode: null, timedOut, spawnFailed: !spawned });
 		});
 		// Drained, never recorded (§4.9): the streams flow and no byte is kept.
 		child.stdout.resume();

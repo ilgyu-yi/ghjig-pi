@@ -44,12 +44,15 @@ export interface DispatchContext {
 	heldHash: string;
 }
 
-/** Fixed loud-refusal causes — content-free, naming no operand (§3.9). */
-const REFUSE_UNRESOLVABLE =
-	"dispatch provision refused: the expected ref resolves to no commit in the caller repository — " +
-	"an unresolvable expected head is ambiguity, never a provisioned tree (SPEC §4.9, §3.9)";
-const REFUSE_CLONE =
-	"dispatch provision refused: the isolated tree could not be cloned and detached at the held hash (SPEC §4.9, §1.5)";
+/** Fixed loud-refusal causes — content-free, naming no operand (§3.9);
+ * exported so the composed pipeline can pass a known cause through. */
+export const PROVISION_REFUSAL_CAUSES = {
+	unresolvable:
+		"dispatch provision refused: the expected ref resolves to no commit in the caller repository — " +
+		"an unresolvable expected head is ambiguity, never a provisioned tree (SPEC §4.9, §3.9)",
+	clone:
+		"dispatch provision refused: the isolated tree could not be cloned and detached at the held hash (SPEC §4.9, §1.5)",
+} as const;
 
 export function provisionDispatchContext(
 	callerRepoRoot: string,
@@ -61,14 +64,22 @@ export function provisionDispatchContext(
 	try {
 		heldHash = execFileSync(
 			"git",
-			["-C", callerRepoRoot, "rev-parse", "--verify", "--quiet", `${options.expectedRef ?? "HEAD"}^{commit}`],
+			[
+				"-C",
+				callerRepoRoot,
+				"rev-parse",
+				"--verify",
+				"--quiet",
+				"--end-of-options",
+				`${options.expectedRef ?? "HEAD"}^{commit}`,
+			],
 			{ encoding: "utf8" },
 		).trim();
 	} catch {
-		throw new Error(REFUSE_UNRESOLVABLE);
+		throw new Error(PROVISION_REFUSAL_CAUSES.unresolvable);
 	}
 	if (!/^[0-9a-f]{40}$/.test(heldHash)) {
-		throw new Error(REFUSE_UNRESOLVABLE);
+		throw new Error(PROVISION_REFUSAL_CAUSES.unresolvable);
 	}
 	// mkdtemp's exclusive creation is the isolation floor two racing
 	// dispatches stand on (§1.5).
@@ -77,13 +88,16 @@ export function provisionDispatchContext(
 	try {
 		execFileSync("git", ["clone", "-q", "--no-hardlinks", callerRepoRoot, treeDir], { encoding: "utf8" });
 		execFileSync("git", ["-C", treeDir, "checkout", "-q", "--detach", heldHash], { encoding: "utf8" });
+		// The clone's origin remote is a route back to the caller repository —
+		// push and fetch both — and is severed here (§1.5).
+		execFileSync("git", ["-C", treeDir, "remote", "remove", "origin"], { encoding: "utf8" });
 		writeFileSync(join(scratchRoot, "brief.md"), options.brief);
 		mkdirSync(join(scratchRoot, "state"));
 	} catch {
 		// A half-provisioned scratch is removed before the loud refusal: the
 		// caller holds no context to clean (§3.9).
 		rmSync(scratchRoot, { recursive: true, force: true });
-		throw new Error(REFUSE_CLONE);
+		throw new Error(PROVISION_REFUSAL_CAUSES.clone);
 	}
 	return {
 		scratchRoot,

@@ -58,10 +58,11 @@
  *     - compare: a `reviewedHead` in the return is CONSUMED and surfaced
  *       as validity alone — `compare: "confirmed"` iff it equals the held
  *       hash, else `"invalid"` — and the return/failure channels stay
- *       content-free with respect to the caller-held operands: no hex run
- *       of ≥ 7 chars prefixing the held hash on any outgoing surface, and
- *       a summary carrying one is REFUSED whole (the mechanical scan §4.9
- *       grounds in §3.9's content-free idiom).
+ *       content-free with respect to the caller-held operands: every hex
+ *       run of ≥ 4 chars in the summary is lowercased, and a summary
+ *       carrying a run the held hash contains, or a run containing the
+ *       held 7-prefix, is REFUSED whole (the mechanical scan §4.9 grounds
+ *       in §3.9's content-free idiom).
  *     - every refusal lands at least one `"category":"dispatch"` audit
  *       record through the landed writer (`audit.ts`), itself content-free.
  *
@@ -69,27 +70,28 @@
  * BEHAVIORAL evidence of the mkdtemp primitive's exclusivity guarantee,
  * never a proof of atomicity — three racing provisions landing three
  * distinct paths is what the primitive promises, and this suite measures
- * the promise's visible face only. The ≥7-hex-prefix scan pins the
- * MECHANICAL rule alone: a delegate paraphrasing the held hash in prose,
- * or encoding it outside a hex run, is §4.9's injectable-context residual,
- * not this suite's subject. The five §3.10 classes are staged by OUTCOME
+ * the promise's visible face only. The hex-run scan pins the MECHANICAL
+ * rule alone: a delegate paraphrasing the held hash in prose, or encoding
+ * it outside a hex run, is §4.9's injectable-context residual, not this
+ * suite's subject. The five §3.10 classes are staged by OUTCOME
  * SHAPE, not cause — which syscall failed inside a shim is not measured,
  * only what the dispatcher admitted. `clone --no-hardlinks` is asserted
  * behaviorally (delegate mutations invisible to the caller), never as a
  * flag spelling; the cleanup's degrade-open audit warn (an unremovable
  * scratch) and the executor's two-timers-one-phase-each split are not
  * staged. Isolation is measured against a MUTATING delegate that commits
- * and writes in its clone; a delegate that pushes to its origin remote is
- * outside these arms.
+ * and writes in its clone, and against a PUSHING delegate whose push
+ * lands no ref in the caller repository.
  *
  * Mutants, both directions, per matcher: the pin arms hold a branch ref
  * against an advanced HEAD and the default HEAD against itself, so a
  * resolve-at-run-time mutant reddens at wrong-tree and a resolve-nothing
  * mutant at the pin arms; admission drives valid → admitted AND every
  * refusal class → refused, so always-admit and always-refuse both redden;
- * the scan drives a held-hash prefix → refused AND an unrelated 7-hex run
- * → admitted; compare drives a computed head → confirmed AND a misreported
- * head → invalid. Control bytes ride generator escapes only — the
+ * the scan drives a held-hash prefix, the uppercased full hash, a 6-char
+ * prefix, and an interior 12-char substring → refused AND an unrelated
+ * hex run → admitted; compare drives a computed head → confirmed AND a
+ * misreported head → invalid. Control bytes ride generator escapes only — the
  * stream-flood arm fills through `yes | head -c`, no literal control byte
  * enters a script.
  */
@@ -262,10 +264,23 @@ const SCRIPT_REVIEWED_HEAD =
 const SCRIPT_HELD_PREFIX =
 	"printf '{\"ok\":true,\"summary\":\"zq work landed at %s today\"}' " +
 	'"$(git rev-parse --short=7 HEAD)" > ../return.json';
+const SCRIPT_HELD_UPPER =
+	"printf '{\"ok\":true,\"summary\":\"zq work landed at %s today\"}' " +
+	'"$(git rev-parse HEAD | tr a-f A-F)" > ../return.json';
+const SCRIPT_HELD_SHORT6 =
+	"printf '{\"ok\":true,\"summary\":\"zq work landed at %s today\"}' " +
+	'"$(git rev-parse HEAD | cut -c1-6)" > ../return.json';
+const SCRIPT_HELD_INTERIOR =
+	"printf '{\"ok\":true,\"summary\":\"zq work landed at %s today\"}' " +
+	'"$(git rev-parse HEAD | cut -c15-26)" > ../return.json';
 const SCRIPT_MUTATE =
 	"printf 'zq intruder bytes' > zq-intruder.txt && git add zq-intruder.txt && " +
 	"git -c user.name=zq -c user.email=zq@zq.zq -c commit.gpgsign=false commit -q -m 'zq delegate commit' && " +
 	"git branch zq-delegate-branch && git rev-parse HEAD > zq-mutated-head";
+const SCRIPT_PUSH =
+	"printf 'zq pushed bytes' > zq-pushed.txt && git add zq-pushed.txt && " +
+	"git -c user.name=zq -c user.email=zq@zq.zq -c commit.gpgsign=false commit -q -m 'zq delegate push commit' && " +
+	"git rev-parse HEAD > zq-pushed-head; git push -q origin HEAD:refs/heads/zq-pushed-branch; true";
 const SCRIPT_OBSERVE_HEAD = "git rev-parse HEAD > zq-observed-head";
 const SCRIPT_SEAM_CAPTURE = 'printf \'%s\' "$GITJIG_TEST_STATE_ROOT" > zq-seam-capture';
 const SCRIPT_STREAM_FLOOD = "yes zqstreamfill | head -c 3000000 && yes zqstreamfill | head -c 3000000 >&2";
@@ -525,6 +540,30 @@ describe("a mutating delegate is invisible to the caller repository (issue #88, 
 			porcelainBefore,
 			"mutation-invisibility: the caller's working tree changed under a dispatched delegate (§1.5)",
 		);
+	});
+
+	it("delegate commits and pushes to its origin remote; no ref lands in the caller repository", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "push-invisibility");
+		const executor = await requireModule<ExecutorModule>("executor.ts", "push-invisibility");
+		const repo = mintRepo();
+		const held = headOf(repo);
+		const refsBefore = git(repo, "for-each-ref");
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		const outcome = await executor.runDelegate(context, ["sh", "-c", SCRIPT_PUSH], { timeoutMs: 30_000 });
+		assert.equal(outcome.exitCode, 0, "push-invisibility: the pushing delegate wedged — the arm is vacuous");
+		assert.notEqual(
+			readFileSync(join(context.treeDir, "zq-pushed-head"), "utf8").trim(),
+			held,
+			"push-invisibility: the delegate's commit did not land in its clone — the arm is vacuous",
+		);
+		assert.equal(
+			git(repo, "for-each-ref"),
+			refsBefore,
+			"push-invisibility: a delegate push landed a ref in the caller repository — the clone's origin " +
+				"remote is a route back across the isolation boundary, and provision severs it (§1.5)",
+		);
+		assert.equal(headOf(repo), held, "push-invisibility: the caller's HEAD moved under a delegate push (§1.5)");
 	});
 });
 
@@ -844,6 +883,69 @@ describe("the blind compare and the operand scan (issue #88, SPEC §4.9, §1.6)"
 			sink,
 			[[held.slice(0, 7), "the held hash's prefix"]],
 			"held-prefix-scan",
+		);
+	});
+
+	it("a summary carrying the UPPERCASED full held hash is refused whole — git resolves uppercased hashes", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "held-upper-scan");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SCRIPT_HELD_UPPER],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[
+				[held.slice(0, 7), "the held hash's prefix"],
+				[held.toUpperCase().slice(0, 7), "the held hash's uppercased prefix"],
+			],
+			"held-upper-scan",
+		);
+	});
+
+	it("a summary carrying a 6-char prefix of the held hash is refused whole", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "held-short6-scan");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SCRIPT_HELD_SHORT6],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[[held.slice(0, 6), "the held hash's 6-char prefix"]],
+			"held-short6-scan",
+		);
+	});
+
+	it("a summary carrying an interior 12-char substring of the held hash is refused whole", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "held-interior-scan");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SCRIPT_HELD_INTERIOR],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[[held.slice(14, 26), "an interior substring of the held hash"]],
+			"held-interior-scan",
 		);
 	});
 

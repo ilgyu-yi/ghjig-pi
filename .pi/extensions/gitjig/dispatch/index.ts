@@ -16,10 +16,11 @@
  * and neither operand ever enters the tool result, the outcome, or the
  * audit trail (§4.9's content-free return channels; §1.6's blind
  * compare). The mechanical outgoing-surface scan enforces the same rule
- * on the admitted summary: any hex run of ≥ 7 chars that touches the
- * held hash refuses the return whole, with a fixed cause (§4.9 grounding
- * in §3.9's content-free idiom; a paraphrased or re-encoded operand is
- * §4.9's injectable-context residual, not this scan's catch).
+ * on the admitted summary: every hex run of ≥ 4 chars (either case) is
+ * lowercased, and the return is refused whole with a fixed cause iff the
+ * held hash contains the run or the run contains the held 7-prefix (§4.9
+ * grounding in §3.9's content-free idiom; a paraphrased or re-encoded
+ * operand is §4.9's injectable-context residual, not this scan's catch).
  *
  * Every dispatch act — admission and each refusal — lands at least one
  * `category:"dispatch"` record through the landed audit writer,
@@ -33,7 +34,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendAuditRecord } from "../audit.ts";
 import { admitReturn, REFUSAL_CAUSES } from "./admit.ts";
 import { runDelegate } from "./executor.ts";
-import { cleanupDispatchContext, provisionDispatchContext, type DispatchContext } from "./provision.ts";
+import {
+	cleanupDispatchContext,
+	PROVISION_REFUSAL_CAUSES,
+	provisionDispatchContext,
+	type DispatchContext,
+} from "./provision.ts";
 
 /** The tool name §4.9's delegation row records, verbatim — one name. */
 export const DISPATCH_TOOL_NAME = "gitjig_dispatch";
@@ -45,21 +51,28 @@ const REFUSE_PROVISION =
 /** Inadmissible argv from the tool surface — refused before any spawn. */
 const REFUSE_ARGV = "dispatch refused: the delegate argv is not an admissible non-empty vector of strings";
 
+/** Inadmissible brief from the tool surface — refused before any provision. */
+const REFUSE_BRIEF = "dispatch refused: the dispatch brief is not an admissible string";
+
 export type DispatchOutcome =
 	| { disposition: "admitted"; ok: boolean; summary: string; compare?: "confirmed" | "invalid" }
 	| { disposition: "refused"; cause: string };
 
 /**
- * True iff a lowercase-hex run of ≥ 7 chars in `text` touches the held
- * operand: a run the held hash starts with, or a run carrying the held
- * 7-prefix inside it. Anything else — unrelated hashes, UUID fragments —
- * is left alone: the scan pins the held operand, not hex at large
- * (an over-blocking scan makes every hash-adjacent summary undeliverable).
+ * The single ruled scan contract: hex runs in `text` match
+ * `/[0-9a-fA-F]{4,}/g`, each run is lowercased, and a run names the held
+ * operand iff the held hash contains the run OR the run contains the held
+ * 7-prefix. Anything else — unrelated hashes, UUID fragments — is left
+ * alone: the scan pins the held operand, not hex at large (an
+ * over-blocking scan makes every hash-adjacent summary undeliverable).
  */
 function namesHeldOperand(text: string, heldHash: string): boolean {
-	const runs = text.match(/[0-9a-f]{7,}/g) ?? [];
+	const runs = text.match(/[0-9a-fA-F]{4,}/g) ?? [];
 	const prefix = heldHash.slice(0, 7);
-	return runs.some((run) => heldHash.startsWith(run) || run.includes(prefix));
+	return runs.some((run) => {
+		const lowered = run.toLowerCase();
+		return heldHash.includes(lowered) || lowered.includes(prefix);
+	});
 }
 
 export interface RunDispatchOptions {
@@ -88,8 +101,12 @@ export async function runDispatch(options: RunDispatchOptions): Promise<Dispatch
 			brief: options.brief,
 			expectedRef: options.expectedRef,
 		});
-	} catch {
-		return refuse("refuse-provision", REFUSE_PROVISION);
+	} catch (error) {
+		// A known provision cause passes through as-is (each is a fixed
+		// content-free literal); anything else refuses on the generic cause.
+		const thrown = error instanceof Error ? error.message : "";
+		const known = (Object.values(PROVISION_REFUSAL_CAUSES) as string[]).includes(thrown);
+		return refuse("refuse-provision", known ? thrown : REFUSE_PROVISION);
 	}
 	try {
 		const run = await runDelegate(context, options.delegateArgv, { timeoutMs: options.timeoutMs });
@@ -184,10 +201,17 @@ export function registerDispatchTool(pi: ExtensionAPI, repoRoot: string, stateRo
 				appendAuditRecord(stateRoot, { category: "dispatch", action: "refuse-argv", text: REFUSE_ARGV });
 				return result(REFUSE_ARGV, { disposition: "refused" });
 			}
+			const brief: unknown = params.brief;
+			if (typeof brief !== "string") {
+				// No coercion: a `String()`-coerced "undefined" brief is a
+				// silently wrong dispatch, not an admitted one.
+				appendAuditRecord(stateRoot, { category: "dispatch", action: "refuse-brief", text: REFUSE_BRIEF });
+				return result(REFUSE_BRIEF, { disposition: "refused" });
+			}
 			const outcome = await runDispatch({
 				callerRepoRoot: repoRoot,
 				stateRoot,
-				brief: String(params.brief),
+				brief,
 				delegateArgv: delegateArgv as string[],
 				expectedRef: typeof params.expectedRef === "string" ? params.expectedRef : undefined,
 			});
