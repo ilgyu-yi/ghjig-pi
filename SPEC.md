@@ -538,7 +538,7 @@ Substrate lands in an adopting repository through the standard flow — a review
 
 ### 4.4 Headless and scripted operation
 
-Any scripted install, verify, or test step that drives the substrate honors the constraints recorded in the issue #4 spike note: headless invocations receive an explicit end-of-input on stdin and pass the explicit project-trust flag, and scripted-provider configurations supply the required placeholder endpoint value. Install tooling that ignores these hangs or fails spuriously; the spike note is the pinned reference for the observed behaviors.
+Any scripted install, verify, or test step that drives the substrate honors the constraints recorded in the issue #4 spike note: headless invocations receive an explicit end-of-input on stdin and pass the explicit project-trust flag, and scripted-provider configurations supply the required placeholder endpoint value. Install tooling that ignores these hangs or fails spuriously; the spike note is the pinned reference for the observed behaviors. One further headless behavior is recorded in the same pattern, measured against pi 0.84.3 on 2026-09-05: session persistence is gated on the first assistant message — a command-only headless run flushes no session file — and the channels the print path wires for a command handler are `appendEntry`, `sendMessage`, and the command context's `waitForIdle`, so a handler whose record must survive a headless run spends one triggered turn to flush it. A substrate whose shape no longer matches this record reads as cannot-measure, never as a pass (§3.9).
 
 ### 4.5 Installed-asset freshness
 
