@@ -142,14 +142,14 @@ interface ExecutorModule {
 		context: DispatchContext,
 		argv: string[],
 		options?: { timeoutMs?: number },
-	): Promise<{ exitCode: number | null; timedOut: boolean }>;
+	): Promise<{ exitCode: number | null; timedOut: boolean; spawnFailed: boolean }>;
 }
 
 interface AdmitModule {
 	admitReturn(returnPath: string):
 		| { admitted: true; ok: boolean; summary: string; reviewedHead?: string }
 		| { admitted: false; cause: string };
-	REFUSAL_CAUSES: { missingReturn: string; malformedReturn: string };
+	REFUSAL_CAUSES: { delegateAbsent: string; missingReturn: string; malformedReturn: string };
 }
 
 type DispatchOutcome =
@@ -498,6 +498,63 @@ describe("provision pins the tree at the once-resolved hash (issue #88, SPEC §4
 		}
 	});
 
+	it("an inherited GIT_DIR cannot retarget provision's own git children at a bystander repository", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "gitdir-poisoned-provision");
+		const repo = mintRepo();
+		const held = headOf(repo);
+		// A distinct tree: two same-second fixtures with identical content
+		// would mint identical commit hashes and blunt the held-hash arm.
+		const bystander = mintRepo({ "zq-bystander.txt": "zq bystander content\n" });
+		git(bystander, "remote", "add", "origin", join(bystander, "zq-nowhere"));
+		const bystanderRefs = git(bystander, "for-each-ref");
+		// Provision runs in-process, so the poison rides the parent env the
+		// git children inherit; set/restore around the call, restore in finally.
+		const hadGitDir = Object.prototype.hasOwnProperty.call(process.env, "GIT_DIR");
+		const priorGitDir = process.env.GIT_DIR;
+		process.env.GIT_DIR = join(bystander, ".git");
+		let context: DispatchContext;
+		try {
+			context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		} finally {
+			if (hadGitDir) {
+				process.env.GIT_DIR = priorGitDir;
+			} else {
+				delete process.env.GIT_DIR;
+			}
+		}
+		cleanups.push(context.scratchRoot);
+		assert.equal(
+			git(bystander, "rev-parse", "--abbrev-ref", "HEAD").trim(),
+			"main",
+			"gitdir-poisoned-provision: the poisoning repository's HEAD is no longer symbolic at main — " +
+				"provision's own git children resolved the inherited GIT_DIR ahead of their -C target and " +
+				"detached a repository provision never owned (§1.5)",
+		);
+		assert.equal(
+			git(bystander, "remote"),
+			"origin\n",
+			"gitdir-poisoned-provision: the poisoning repository's remotes changed — provision's origin sever " +
+				"landed in the wrong repository under an inherited GIT_DIR (§1.5)",
+		);
+		assert.equal(
+			git(bystander, "for-each-ref"),
+			bystanderRefs,
+			"gitdir-poisoned-provision: the poisoning repository's refs changed under a poisoned provision (§1.5)",
+		);
+		assert.equal(
+			context.heldHash,
+			held,
+			"gitdir-poisoned-provision: the held hash is not the caller's HEAD — an inherited GIT_DIR retargeted " +
+				"the once-resolved pin at another repository (§4.9 pin-at-provision)",
+		);
+		assert.equal(
+			git(context.treeDir, "remote"),
+			"",
+			"gitdir-poisoned-provision: the clone's origin remote is still standing — the sever ran against the " +
+				"poisoning repository instead, leaving the route back to the caller open (§1.5)",
+		);
+	});
+
 	it("cleanup removes the scratch", async () => {
 		const provision = await requireModule<ProvisionModule>("provision.ts", "cleanup");
 		const repo = mintRepo();
@@ -681,6 +738,51 @@ describe("the executor's child is drained and seam-scoped (issue #88, SPEC §4.9
 			refsBefore,
 			"gitdir-egress: a delegate write landed a ref in the caller repository under an inherited GIT_DIR — " +
 				"the cwd pin is not the repo pin (§1.5)",
+		);
+	});
+
+	it("an empty-string argv entry settles spawnFailed and refuses on the delegate-absent cause", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "spawn-throw");
+		const executor = await requireModule<ExecutorModule>("executor.ts", "spawn-throw");
+		const admit = await requireModule<AdmitModule>("admit.ts", "spawn-throw");
+		const index = await requireModule<IndexModule>("index.ts", "spawn-throw");
+		const repo = mintRepo();
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		// The tool-surface argv guard admits [""] (a non-empty array of
+		// strings), so the synchronous spawn throw must SETTLE into the
+		// closed outcome set — a raw rejection escapes §3.10's taxonomy.
+		const run = await executor.runDelegate(context, [""], { timeoutMs: 5_000 });
+		assert.deepEqual(
+			run,
+			{ exitCode: null, timedOut: false, spawnFailed: true },
+			"spawn-throw: a synchronous spawn throw did not settle { exitCode: null, timedOut: false, " +
+				"spawnFailed: true } — the child never started, which is §3.10's delegate-absent class, " +
+				"never an escaped rejection",
+		);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: [""],
+			timeoutMs: 5_000,
+		});
+		assert.equal(
+			outcome.disposition,
+			"refused",
+			`spawn-throw: the dispatch did not refuse an unspawnable argv: ${JSON.stringify(outcome)}`,
+		);
+		assert.equal(
+			(outcome as { cause: string }).cause,
+			admit.REFUSAL_CAUSES.delegateAbsent,
+			"spawn-throw: the refusal did not ride the fixed delegate-absent cause — every refusal crosses on a " +
+				"fixed content-free literal (§3.9, §3.10)",
+		);
+		assert.ok(
+			dispatchAuditLines(sink).length >= 1,
+			'spawn-throw: no "category":"dispatch" audit record landed — every dispatch act lands at least one ' +
+				`record through the landed writer (§5.5); audit: ${JSON.stringify(auditLines(sink))}`,
 		);
 	});
 });

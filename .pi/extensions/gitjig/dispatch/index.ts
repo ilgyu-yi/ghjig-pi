@@ -191,8 +191,11 @@ export function registerDispatchTool(pi: ExtensionAPI, repoRoot: string, stateRo
 		label: "Dispatch",
 		description:
 			"Dispatch a delegate into an isolated clone of this repository, pinned at a once-resolved head. " +
-			"The delegate's whole writable world is the clone; the only thing that crosses back is a bounded " +
-			"structured return, and a compare outcome surfaces as validity alone.",
+			"Locally, the delegate's writable world is the clone — the routes the clone plants back to the " +
+			"caller repository are severed at provision — but the delegate runs in the caller's trust domain " +
+			"and inherits its environment, credentials included: remote reach through inherited credentials " +
+			"is not confined. The only thing that crosses back is a bounded structured return, and a compare " +
+			"outcome surfaces as validity alone.",
 		parameters: DISPATCH_PARAMS as Parameters<ExtensionAPI["registerTool"]>[0]["parameters"],
 		async execute(_toolCallId, params) {
 			const delegateArgv: unknown = params.delegateArgv;

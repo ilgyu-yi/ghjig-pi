@@ -8,7 +8,9 @@
  * of the caller repository into a `mkdtempSync` scratch, detached at the
  * held hash, so the provisioned tree equals the held operand by
  * construction and nothing at run time can re-resolve the ref (§4.9).
- * Scratch layout: `tree/` (the delegate's cwd and whole writable world),
+ * Scratch layout: `tree/` (the delegate's cwd and its whole local
+ * writable world — the delegate runs in the caller's trust domain and
+ * inherits its environment, credentials included),
  * `brief.md` (the dispatched brief's bytes, §1.5's dispatch-facts
  * carrier), `state/` (the delegate's rebound state seam, §5.5), and the
  * `return.json` slot — the sole crossing, reached by the delegate as
@@ -40,6 +42,25 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+/**
+ * A copy of `base` with the repo-locating family — `GIT_DIR`,
+ * `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
+ * `GIT_COMMON_DIR` — deleted: git resolves these ahead of both cwd and
+ * `-C`, so an inherited one retargets a git child's reads and writes at
+ * whatever repository the variable names (§1.5). One hazard, one
+ * spelling: provision's own git children and the executor's delegate
+ * both build their env from this helper, never from a copied list.
+ */
+export function withoutRepoLocatingGitEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const env = { ...base };
+	delete env.GIT_DIR;
+	delete env.GIT_WORK_TREE;
+	delete env.GIT_INDEX_FILE;
+	delete env.GIT_OBJECT_DIRECTORY;
+	delete env.GIT_COMMON_DIR;
+	return env;
+}
+
 /** The provisioned context: path-pinned layout plus the held operand. */
 export interface DispatchContext {
 	scratchRoot: string;
@@ -65,6 +86,11 @@ export function provisionDispatchContext(
 	callerRepoRoot: string,
 	options: { brief: string; expectedRef?: string },
 ): DispatchContext {
+	// Every git child below runs with the repo-locating GIT_* family
+	// scrubbed: an inherited GIT_DIR would retarget these very children —
+	// the resolve, the detach, the origin sever — at another repository
+	// despite their -C target (§1.5).
+	const env = withoutRepoLocatingGitEnv(process.env);
 	// Resolved once, here, in the caller's repository; the hash is held and
 	// every later act binds to it (§4.9 pin-at-provision).
 	let heldHash: string;
@@ -80,7 +106,7 @@ export function provisionDispatchContext(
 				"--end-of-options",
 				`${options.expectedRef ?? "HEAD"}^{commit}`,
 			],
-			{ encoding: "utf8" },
+			{ encoding: "utf8", env },
 		).trim();
 	} catch {
 		throw new Error(PROVISION_REFUSAL_CAUSES.unresolvable);
@@ -93,11 +119,11 @@ export function provisionDispatchContext(
 	const scratchRoot = mkdtempSync(join(tmpdir(), "gitjig-dispatch-"));
 	const treeDir = join(scratchRoot, "tree");
 	try {
-		execFileSync("git", ["clone", "-q", "--no-hardlinks", callerRepoRoot, treeDir], { encoding: "utf8" });
-		execFileSync("git", ["-C", treeDir, "checkout", "-q", "--detach", heldHash], { encoding: "utf8" });
+		execFileSync("git", ["clone", "-q", "--no-hardlinks", callerRepoRoot, treeDir], { encoding: "utf8", env });
+		execFileSync("git", ["-C", treeDir, "checkout", "-q", "--detach", heldHash], { encoding: "utf8", env });
 		// The clone's origin remote is a route back to the caller repository —
 		// push and fetch both — and is severed here (§1.5).
-		execFileSync("git", ["-C", treeDir, "remote", "remove", "origin"], { encoding: "utf8" });
+		execFileSync("git", ["-C", treeDir, "remote", "remove", "origin"], { encoding: "utf8", env });
 		// The clone's reflog is the second planted route back: `.git/logs`
 		// records `clone: from <caller-path>`, and a by-path push needs no
 		// remote. Removed whole (§1.5).

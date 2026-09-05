@@ -34,7 +34,7 @@
  * environment, and outlives the scratch's removal.
  */
 import { spawn } from "node:child_process";
-import type { DispatchContext } from "./provision.ts";
+import { withoutRepoLocatingGitEnv, type DispatchContext } from "./provision.ts";
 
 /** Grace for stream flush after exit, when an orphan may hold the pipes. */
 const STREAM_GRACE_MS = 2_000;
@@ -68,25 +68,29 @@ export function runDelegate(
 			settled = true;
 			resolve(outcome);
 		};
-		// Passthrough with the repo-locating GIT_* family deleted — git
-		// resolves these ahead of cwd, so an inherited one would retarget the
-		// delegate's writes at the caller repository (§1.5) — and the one
-		// state seam rebound (§5.5); nothing else is edited.
-		const env = { ...process.env };
-		delete env.GIT_DIR;
-		delete env.GIT_WORK_TREE;
-		delete env.GIT_INDEX_FILE;
-		delete env.GIT_OBJECT_DIRECTORY;
-		delete env.GIT_COMMON_DIR;
+		// Passthrough with the repo-locating GIT_* family deleted — the one
+		// shared scrub provision's own git children ride too (§1.5) — and
+		// the one state seam rebound (§5.5); nothing else is edited.
+		const env = withoutRepoLocatingGitEnv(process.env);
 		env.GITJIG_TEST_STATE_ROOT = context.stateDir;
-		const child = spawn(argv[0], argv.slice(1), {
-			cwd: context.treeDir,
-			// Detached: the child leads its own process group, so the bound's
-			// kill reaches delegate-spawned children too, not the child alone.
-			detached: true,
-			env,
-			stdio: ["ignore", "pipe", "pipe"],
-		});
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawn(argv[0], argv.slice(1), {
+				cwd: context.treeDir,
+				// Detached: the child leads its own process group, so the bound's
+				// kill reaches delegate-spawned children too, not the child alone.
+				detached: true,
+				env,
+				stdio: ["ignore", "pipe", "pipe"],
+			});
+		} catch {
+			// A synchronous spawn throw (an empty or NUL-bearing argv entry the
+			// tool-surface guard admits): nothing started, no timer is armed
+			// yet, and the outcome settles into §3.10's delegate-absent class —
+			// a raw rejection would escape the closed refusal taxonomy.
+			settle({ exitCode: null, timedOut: false, spawnFailed: true });
+			return;
+		}
 		let spawned = false;
 		child.on("spawn", () => {
 			spawned = true;
