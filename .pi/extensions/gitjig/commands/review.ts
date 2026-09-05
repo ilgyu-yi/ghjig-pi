@@ -50,7 +50,8 @@ export function registerReviewCommand(pi: ExtensionAPI, repoRoot: string, stateR
 		description:
 			"Dispatch a review delegate into an isolated clone pinned at a once-resolved expected head: " +
 			"/review <expectedRef> <delegateArgv…>. Only the bounded return crosses back, and the compare " +
-			"surfaces as validity alone.",
+			"surfaces as validity alone. The delegate runs in the caller's trust domain and inherits its " +
+			"environment, credentials included: remote reach through inherited credentials is not confined.",
 		handler: async (args: string, ctx) => {
 			const tokens = args.split(/\s+/).filter((token) => token !== "");
 			if (tokens.length < 2) {

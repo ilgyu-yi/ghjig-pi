@@ -64,13 +64,13 @@
  *     platform-held review verdict, the platform-held AC state, and the
  *     merge act; on invocation it appends a session entry
  *     `customType: "gitjig-ship"` whose data carries a `composition`
- *     token, `"satisfied"` or `"unsatisfied"`, and a fact-less invocation
- *     composes `"unsatisfied"`. The fact GRAMMAR (how a caller supplies
- *     verdict/head/AC facts) is the Code phase's discretion and is
- *     deliberately NOT bound here: the arms bind the description row and
- *     the fact-less direction of the report shape, the loosest grammar
- *     that can bind the contract; the satisfied direction stays unbound
- *     until the grammar exists and is disclosed as such at the arm.
+ *     token, `"satisfied"` or `"unsatisfied"`. Both directions of the
+ *     report shape are bound: a fact-less invocation composes
+ *     `"unsatisfied"`, and an invocation supplying the landed fact
+ *     grammar (`verdict-head=<the caller repo's real head> ac=closed`)
+ *     composes `"satisfied"` — the satisfied run over its own caller
+ *     fixture, because the ship anchor asserts exactly one `gitjig-ship`
+ *     entry per fixture.
  *
  * TEMPLATE NORMS (AC 4). A lexical read of `.pi/prompts/work-on.md`'s
  * committed bytes: the issue-first-entry token (§1.1's standard flow) and
@@ -83,7 +83,7 @@
  * `.pi/` (none exists in this repository) is outside the governed-home
  * filter by the conjunct's own `baseDir` limb. The operand sweep is
  * LEXICAL — case-folded ≥ 4-char hex runs held to containment against the
- * held operand, the dispatcher's own rule — over the caller fixture's
+ * held operand, the dispatcher's own rule — over each caller fixture's
  * session entries, audit trail, and run output; a paraphrased or
  * re-encoded operand is §4.9's injectable-context residual. A green
  * `review` round trip says nothing about any delegate's quality: the
@@ -308,6 +308,10 @@ let reviewRun: PiRunResult;
 let shipRun: PiRunResult;
 /** The compare operand: the caller fixture repo's HEAD. */
 let heldHash: string;
+let satisfiedFixture: Fixture;
+let satisfiedShipRun: PiRunResult;
+/** The satisfied run's operand: its own fixture repo's HEAD, supplied on the prompt line alone. */
+let satisfiedHeldHash: string;
 
 before(async () => {
 	// The headless-dispatch probe rides its own fixture so its throwaway
@@ -384,10 +388,27 @@ before(async () => {
 	heldHash = git("rev-parse", "HEAD").trim();
 	reviewRun = await runPi(callerFixture, { prompt: "/review main sh zq-delegate.sh", timeoutMs: 180_000 });
 	shipRun = await runPi(callerFixture, { prompt: "/ship", timeoutMs: 120_000 });
+
+	// The satisfied-direction caller: its own fixture (the ship anchor
+	// asserts exactly one gitjig-ship entry per fixture), same copied-bytes
+	// runtime idiom; the prompt line supplies the fixture repo's real head —
+	// the one surface the operand is allowed to appear on.
+	satisfiedFixture = buildFixture({ script: TEXT_ONLY_SCRIPT, extensionFiles: runtimeFileMap() });
+	writeFileSync(join(satisfiedFixture.root, "zq-satisfied-base.txt"), "zq ship satisfied-direction caller content\n");
+	const satisfiedGit = (...args: string[]): string =>
+		execFileSync("git", ["-C", satisfiedFixture.root, ...GIT_FLAGS, ...args], { encoding: "utf8" });
+	execFileSync("git", ["init", "-q", "-b", "main", satisfiedFixture.root], { encoding: "utf8" });
+	satisfiedGit("add", ".pi", "zq-satisfied-base.txt");
+	satisfiedGit("commit", "-q", "-m", "zq ship satisfied-direction caller fixture");
+	satisfiedHeldHash = satisfiedGit("rev-parse", "HEAD").trim();
+	satisfiedShipRun = await runPi(satisfiedFixture, {
+		prompt: `/ship verdict-head=${satisfiedHeldHash} ac=closed`,
+		timeoutMs: 120_000,
+	});
 });
 
 after(() => {
-	for (const fixture of [probeFixture, registrationFixture, mutantExtensionFixture, mutantPromptFixture, callerFixture]) {
+	for (const fixture of [probeFixture, registrationFixture, mutantExtensionFixture, mutantPromptFixture, callerFixture, satisfiedFixture]) {
 		if (fixture !== undefined) {
 			removeFixture(fixture);
 		}
@@ -424,6 +445,18 @@ function requireShipEntry(arm: string): Record<string, unknown> {
 		1,
 		`${redUntilLanded(arm, "the ship extension command")} — no gitjig-ship session entry crossed back ` +
 			`from the /ship invocation\n${diagnostics(shipRun)}`,
+	);
+	return entries[0] as Record<string, unknown>;
+}
+
+/** The satisfied run's anchor: the one gitjig-ship entry on its OWN fixture. */
+function requireSatisfiedShipEntry(arm: string): Record<string, unknown> {
+	const entries = customEntries(satisfiedFixture, "gitjig-ship");
+	assert.equal(
+		entries.length,
+		1,
+		`${arm}: the fact-bearing /ship run left ${entries.length} gitjig-ship session entries on its fixture, ` +
+			`not exactly one\n${diagnostics(satisfiedShipRun)}`,
 	);
 	return entries[0] as Record<string, unknown>;
 }
@@ -652,14 +685,12 @@ describe("the ship composition: caller-supplied facts, offline undecidables name
 		}
 	});
 
-	it("a fact-less invocation composes 'unsatisfied' — the report distinguishes, in the direction the loosest grammar reaches", () => {
-		// The fact GRAMMAR is the Code phase's discretion (header): this arm
-		// binds the report SHAPE on the one invocation every grammar accepts —
-		// no facts supplied — where the composition cannot be satisfied. The
-		// satisfied direction is deliberately unbound until the grammar
-		// exists; exact equality on the composition field (never containment:
-		// "unsatisfied" contains "satisfied") is what makes this arm the
-		// distinguishing half it claims.
+	it("a fact-less invocation composes 'unsatisfied' — the report's distinguishing half in the unsatisfied direction", () => {
+		// This arm binds the report SHAPE on the one invocation every grammar
+		// accepts — no facts supplied — where the composition cannot be
+		// satisfied; exact equality on the composition field (never
+		// containment: "unsatisfied" contains "satisfied") is what makes this
+		// arm the distinguishing half it claims.
 		const entry = requireShipEntry("ship-composition");
 		const data = (entry as { data?: { composition?: unknown } }).data;
 		assert.equal(
@@ -668,6 +699,61 @@ describe("the ship composition: caller-supplied facts, offline undecidables name
 			`ship-composition: a fact-less /ship did not report an unsatisfied composition — the composed ` +
 				`report must distinguish a satisfied from an unsatisfied composition, and with no caller-supplied ` +
 				`facts nothing the merge-boundary rows name is discharged; entry: ${JSON.stringify(entry)}`,
+		);
+	});
+
+	it("a fact-bearing invocation composes 'satisfied' — the report's other direction", () => {
+		const entry = requireSatisfiedShipEntry("ship-satisfied");
+		const data = (
+			entry as { data?: { composition?: unknown; verdictPinned?: unknown; acClosure?: unknown } }
+		).data;
+		assert.equal(
+			data?.composition,
+			"satisfied",
+			`ship-satisfied: /ship with verdict-head=<the fixture repo's real head> ac=closed did not compose ` +
+				`'satisfied' — the composed report must distinguish both directions, and here every fact the ` +
+				`merge-boundary rows name is discharged; entry: ${JSON.stringify(entry)}`,
+		);
+		assert.equal(
+			data?.verdictPinned,
+			"confirmed",
+			`ship-satisfied: the supplied verdict head byte-equals the fixture's once-resolved local head and the ` +
+				`per-check token is not 'confirmed'; entry: ${JSON.stringify(entry)}`,
+		);
+		assert.equal(
+			data?.acClosure,
+			"asserted",
+			`ship-satisfied: ac=closed was supplied and the per-check token is not 'asserted'; entry: ` +
+				`${JSON.stringify(entry)}`,
+		);
+	});
+
+	it("operand absence on the satisfied run: the prompt-line head lands in zero session entries, audit lines, and output bytes", () => {
+		// Non-vacuous by the arm above: the same held head satisfied the
+		// byte-equality, so it DID reach the handler — through the prompt
+		// line, the one surface the operator supplied it on.
+		requireSatisfiedShipEntry("ship-satisfied-operand-absence");
+		for (const entry of readSessionEntries(satisfiedFixture)) {
+			assert.deepEqual(
+				heldOperandRuns(JSON.stringify(entry), satisfiedHeldHash),
+				[],
+				"ship-satisfied-operand-absence: the supplied verdict head reached a session entry — an expected " +
+					"head in an injectable context makes every later blind compare at that head echoable (§4.9, §1.6)",
+			);
+		}
+		for (const line of existsSync(satisfiedFixture.auditFile) ? readAuditLines(satisfiedFixture) : []) {
+			assert.deepEqual(
+				heldOperandRuns(line, satisfiedHeldHash),
+				[],
+				"ship-satisfied-operand-absence: the supplied verdict head reached the audit trail (§3.8's " +
+					"refusal-record rule; §4.9)",
+			);
+		}
+		assert.deepEqual(
+			heldOperandRuns(satisfiedShipRun.stdout + satisfiedShipRun.stderr, satisfiedHeldHash),
+			[],
+			"ship-satisfied-operand-absence: the supplied verdict head reached the run's terminal output — the " +
+				"command layer's visible surfaces inherit the dispatcher's content-free channels (§4.9)",
 		);
 	});
 });
