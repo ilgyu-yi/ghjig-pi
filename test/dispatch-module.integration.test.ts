@@ -1249,6 +1249,134 @@ describe("the blind compare and the operand scan (issue #88, SPEC §4.9, §1.6)"
 // Tool surface: no parameter is coerced — present-but-wrong-typed refuses.
 // ---------------------------------------------------------------------------
 
+describe("the run bound is reachable from the tool surface (issue #94, SPEC §4.9, §3.10)", () => {
+	/** The registered tool's execute shape plus the schema it advertises. */
+	interface BoundTool {
+		parameters: { properties: Record<string, unknown> };
+		execute(
+			toolCallId: string,
+			params: Record<string, unknown>,
+		): Promise<{ content: Array<{ type: string; text: string }>; details: Record<string, unknown> }>;
+	}
+
+	/** One delegate, slow enough that the bound decides its fate rather than the machine. */
+	const SLOW = `sleep 3; ${COPY("payload-valid.json")}`;
+
+	function register(arm: string, index: IndexModule, repo: string, stateRoot: string): BoundTool {
+		let registered: BoundTool | undefined;
+		index.registerDispatchTool({ registerTool: (spec: unknown) => (registered = spec as BoundTool) }, repo, stateRoot);
+		assert.ok(registered !== undefined, `${arm}: registerDispatchTool registered no tool — the arm is vacuous`);
+		return registered;
+	}
+
+	it("the advertised schema carries the bound, so a caller can supply one at all", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "bound-schema");
+		const tool = register("bound-schema", index, mintRepo(PAYLOADS), mintStateRoot().stateRoot);
+		assert.ok(
+			Object.prototype.hasOwnProperty.call(tool.parameters.properties, "timeoutMs"),
+			"bound-schema: the tool advertises no run bound, so the option the executor already honors is " +
+				`reachable by nobody and every dispatch runs at the default (§4.9): ${JSON.stringify(tool.parameters.properties)}`,
+		);
+	});
+
+	it("a caller-supplied bound BELOW the delegate's own duration terminates it", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "bound-low");
+		const sink = mintStateRoot();
+		const tool = register("bound-low", index, mintRepo(PAYLOADS), sink.stateRoot);
+		const result = await tool.execute("zq-toolcall", {
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SLOW],
+			timeoutMs: 400,
+		});
+		assert.equal(
+			result.details.disposition,
+			"refused",
+			"bound-low: a bound well under the delegate's own duration admitted anyway — the supplied value " +
+				`reached nothing and the default decided the run (§4.9): ${JSON.stringify(result)}`,
+		);
+		assert.ok(
+			dispatchAuditLines(sink).some((line) => line.includes('"action":"refuse-bound-exceeded"')),
+			"bound-low: the refusal did not land the bound-exceeded record, so the outcome class the caller's " +
+				`own bound produced is not readable from the trail (§5.5): ${JSON.stringify(dispatchAuditLines(sink))}`,
+		);
+	});
+
+	it("the SAME delegate admits under a raised bound — the parameter is live in both directions", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "bound-high");
+		const tool = register("bound-high", index, mintRepo(PAYLOADS), mintStateRoot().stateRoot);
+		const result = await tool.execute("zq-toolcall", {
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SLOW],
+			timeoutMs: 30_000,
+		});
+		assert.equal(
+			result.details.disposition,
+			"admitted",
+			"bound-high: the same delegate that the low bound terminated was refused under a raised one too — " +
+				`a bound accepted and ignored passes the schema arm while changing nothing: ${JSON.stringify(result)}`,
+		);
+	});
+
+	it("a present-but-non-numeric bound refuses on a fixed cause, never a coerced run", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "bound-type");
+		const sink = mintStateRoot();
+		const tool = register("bound-type", index, mintRepo(PAYLOADS), sink.stateRoot);
+		const result = await tool.execute("zq-toolcall", {
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-valid.json")],
+			timeoutMs: "600000",
+		});
+		assert.equal(
+			result.details.disposition,
+			"refused",
+			"bound-type: a string bound was not refused — the sibling expectedRef guard refuses rather than " +
+				`coercing, and one surface does not carry two rules (§2.7, §3.11): ${JSON.stringify(result)}`,
+		);
+		assert.ok(
+			!JSON.stringify(result).includes("600000"),
+			"bound-type: the refusal names the rejected value — the cause is a fixed content-free literal (§3.9)",
+		);
+		assert.ok(
+			dispatchAuditLines(sink).some((line) => line.includes('"action":"refuse-timeout-ms"')),
+			`bound-type: no dispatch refuse-timeout-ms record landed (§5.5): ${JSON.stringify(dispatchAuditLines(sink))}`,
+		);
+	});
+
+	it("a non-positive bound is refused too — zero is not a bound, it is an unrunnable dispatch", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "bound-nonpositive");
+		const tool = register("bound-nonpositive", index, mintRepo(PAYLOADS), mintStateRoot().stateRoot);
+		for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+			const result = await tool.execute("zq-toolcall", {
+				brief: BRIEF,
+				delegateArgv: ["sh", "-c", COPY("payload-valid.json")],
+				timeoutMs: value,
+			});
+			assert.equal(
+				result.details.disposition,
+				"refused",
+				`bound-nonpositive: ${String(value)} was accepted as a bound — a value that cannot bound a run is ` +
+					`the actor's own input and refuses rather than resolving to something they did not ask for ` +
+					`(§3.9): ${JSON.stringify(result)}`,
+			);
+		}
+	});
+
+	it("an absent bound stays legal and runs at the default", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "bound-absent");
+		const tool = register("bound-absent", index, mintRepo(PAYLOADS), mintStateRoot().stateRoot);
+		const result = await tool.execute("zq-toolcall", {
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-valid.json")],
+		});
+		assert.equal(
+			result.details.disposition,
+			"admitted",
+			"bound-absent: omitting the bound stopped being legal — the fix is reach, never a new requirement " +
+				`on callers that were fine (§4.9): ${JSON.stringify(result)}`,
+		);
+	});
+});
+
 describe("the tool surface refuses a present-but-non-string expectedRef (issue #88, SPEC §4.9)", () => {
 	/** The registered tool's execute shape, captured through a fake pi. */
 	interface RegisteredTool {
