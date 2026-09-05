@@ -35,37 +35,37 @@ This document is the repository's behavioural SSOT: every enforced norm, gate cl
 | &nbsp;&nbsp;§3.1 | The constraint | 322 |
 | &nbsp;&nbsp;§3.2 | The three tiers | 329 |
 | &nbsp;&nbsp;§3.3 | Gate classes | 337 |
-| &nbsp;&nbsp;§3.4 | Agent-agnosticism of the tiers | 401 |
-| &nbsp;&nbsp;§3.5 | Gate conduct | 405 |
-| &nbsp;&nbsp;§3.6 | Enforcement-face selection | 409 |
-| &nbsp;&nbsp;§3.7 | Approval-gate completeness | 419 |
-| &nbsp;&nbsp;§3.8 | Escape architecture | 431 |
-| &nbsp;&nbsp;§3.9 | Fail policy | 444 |
-| &nbsp;&nbsp;§3.10 | Delegated computation | 458 |
-| &nbsp;&nbsp;§3.11 | Gate design | 468 |
-| &nbsp;&nbsp;§3.12 | Gate verification | 490 |
-| §4 | Substrate and install contract | 500 |
-| &nbsp;&nbsp;§4.1 | Namespaces | 504 |
-| &nbsp;&nbsp;§4.2 | Target-parameterization | 510 |
-| &nbsp;&nbsp;§4.3 | PR-based installs | 514 |
-| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 518 |
-| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 522 |
-| &nbsp;&nbsp;§4.6 | Binding and resolution | 528 |
-| &nbsp;&nbsp;§4.7 | Host boundary | 538 |
-| &nbsp;&nbsp;§4.8 | The command layer | 546 |
-| &nbsp;&nbsp;§4.9 | The delegation layer | 603 |
-| §5 | Cross-cutting contracts | 643 |
-| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 647 |
-| &nbsp;&nbsp;§5.2 | Graceful degradation | 651 |
-| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 655 |
-| &nbsp;&nbsp;§5.4 | Work language | 659 |
-| &nbsp;&nbsp;§5.5 | State boundary | 663 |
-| &nbsp;&nbsp;§5.6 | Operating modes | 669 |
-| &nbsp;&nbsp;§5.7 | Unattended conduct | 679 |
-| &nbsp;&nbsp;§5.8 | Context lifecycle | 689 |
-| &nbsp;&nbsp;§5.9 | Session surfaces | 697 |
-| §6 | Self-governance milestone | 705 |
-| &nbsp;&nbsp;§6.1 | Substrate posture | 716 |
+| &nbsp;&nbsp;§3.4 | Agent-agnosticism of the tiers | 422 |
+| &nbsp;&nbsp;§3.5 | Gate conduct | 426 |
+| &nbsp;&nbsp;§3.6 | Enforcement-face selection | 430 |
+| &nbsp;&nbsp;§3.7 | Approval-gate completeness | 440 |
+| &nbsp;&nbsp;§3.8 | Escape architecture | 452 |
+| &nbsp;&nbsp;§3.9 | Fail policy | 465 |
+| &nbsp;&nbsp;§3.10 | Delegated computation | 479 |
+| &nbsp;&nbsp;§3.11 | Gate design | 489 |
+| &nbsp;&nbsp;§3.12 | Gate verification | 511 |
+| §4 | Substrate and install contract | 521 |
+| &nbsp;&nbsp;§4.1 | Namespaces | 525 |
+| &nbsp;&nbsp;§4.2 | Target-parameterization | 531 |
+| &nbsp;&nbsp;§4.3 | PR-based installs | 535 |
+| &nbsp;&nbsp;§4.4 | Headless and scripted operation | 539 |
+| &nbsp;&nbsp;§4.5 | Installed-asset freshness | 543 |
+| &nbsp;&nbsp;§4.6 | Binding and resolution | 549 |
+| &nbsp;&nbsp;§4.7 | Host boundary | 559 |
+| &nbsp;&nbsp;§4.8 | The command layer | 567 |
+| &nbsp;&nbsp;§4.9 | The delegation layer | 624 |
+| §5 | Cross-cutting contracts | 664 |
+| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 668 |
+| &nbsp;&nbsp;§5.2 | Graceful degradation | 672 |
+| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 676 |
+| &nbsp;&nbsp;§5.4 | Work language | 680 |
+| &nbsp;&nbsp;§5.5 | State boundary | 684 |
+| &nbsp;&nbsp;§5.6 | Operating modes | 690 |
+| &nbsp;&nbsp;§5.7 | Unattended conduct | 700 |
+| &nbsp;&nbsp;§5.8 | Context lifecycle | 710 |
+| &nbsp;&nbsp;§5.9 | Session surfaces | 718 |
+| §6 | Self-governance milestone | 726 |
+| &nbsp;&nbsp;§6.1 | Substrate posture | 737 |
 <!-- TOC END -->
 
 ## 0. Intent and scope
@@ -359,7 +359,7 @@ The gate classes the enforcement layer commits to are recorded in the table belo
 | ac-closeout | merging a PR whose closing issue has unresolved AC | `home:` tier 3 (procedural today, §2.2) · `backstop:` deferred (§3.11 amortized) · `earlier:` tier 1 echo planned | `supplies:` platform (issue AC + merge event) / `infers:` session |
 | change-reach | retired SSOT vocabulary surviving the declared-set completion check | `home:` tier 3 (procedural today, §2.6) · `backstop:` none (reversible) · `earlier:` — | `supplies:` git (trailers) + platform (push history) / `infers:` session |
 | approval-evidence | a gated approval's terminal action firing without the approval's evidence artifact | `home:` tier 3 (procedural today, §3.7) · `backstop:` merge arm: ruleset for the landing itself, approval predicate deferred (§3.11 amortized); other arms: none (reversible) · `earlier:` tier 1 echo planned | `supplies:` platform (evidence artifact + terminal act) / `infers:` session |
-| egress | publishing repo-derived text that carries a secret to a public, unretractable surface | `home:` tier 1 (publish call site; procedural today, §3.6) · `backstop:` none (structurally unavailable, §3.11) · `earlier:` — | `supplies:` session (bytes at the publish call) / `infers:` platform |
+| egress | publishing repo-derived text that carries a secret to a public, unretractable surface | `home:` tier 1 (publish call site; the runtime's publish tool `gitjig_publish`, `.pi/extensions/gitjig/publish/`) · `backstop:` none (structurally unavailable, §3.11) · `earlier:` — | `supplies:` session (bytes at the publish call) / `infers:` platform |
 
 **Two families fall out of the rule.** A class whose deciding parts are all exact at the platform — the ref a push will land on, a pull request's file set, a merge event and the artifacts hanging off it — homes at tier 3, because the platform holds the last-needed part and the act guarded is the publication itself. A class whose deciding object exists in git before anything is published, and has no platform representation at the moment its guarded act fires, homes at tier 2 — the platform may read what was eventually pushed, but it cannot read the object the decision is taken over. The families are stated as shapes, never as memberships: each row's home follows from its own deciding information, so a class that acquires a platform representation of its deciding object re-homes without this paragraph changing. Neither family is a partition: a class whose deciding object never leaves the session falls outside both and homes at tier 1 alone (§3.4), and the arms of a class that guards more than one act may fall in different families.
 
@@ -380,7 +380,7 @@ With P in hand, the boundary is total over what the adapter hands the predicate 
 
 **`secret` staged-scan semantics.** The class's decision is taken at tier 2, and this block is its prose home — the semantics the delegated scan (`scan_staged_secrets`, the interface `.githooks/_lib.sh` declares) evaluates. Whether an instrument holds the home is the row's `home:` slot's own fact, recorded there and not restated here.
 
-*Rule source.* The pattern set is one committed data file, `.githooks/helpers/secret-patterns`, resolved from the **reading helper's own installed position** — the reader reads the file standing beside it in the working tree — because the bytes every reader must agree on are the committed repo file, and a reader that spelled the tier's directory against the ambient toplevel instead reads nothing at all wherever the tier is installed under another name. §3.6's worked application binds the egress scan to that same single committed file. The second reader is stated for resolvability, not pre-empted: the egress consumer reads the same committed bytes when its own cycle lands (§3.6's hardening trigger). Format: one pattern per line as `id<TAB>ERE` — tab-delimited because a pattern may carry spaces — with blank lines and `#`-leading lines ignored, and a row's trailing carriage return stripped at the parse (a `core.autocrlf` checkout smudge would otherwise ride every ERE, which then compiles cleanly yet can never match an LF-terminated added line — an armed-looking scan that checks nothing; the file additionally ships a `-text` attribute so conversion never rewrites the committed bytes); IDs are lowercase-hyphen tokens, because the ID is what a refusal record carries. Patterns are constrained to the POSIX-ERE ∩ RegExp common subset — no backreferences or lookarounds, no backslash-letter classes, no POSIX bracket classes, explicit ranges only — so every committed line compiles for both readers; format extensions must be compatible extensions only (additions a current reader ignores, never a reinterpretation of existing lines), which is what bounds skew between the two readers of one file, since §3.6's second reader lands through its own cycle and the file changes between them. The tier-2 reader matches under `LC_ALL=C` byte semantics with the hook interpreter's own ERE engine (`[[ =~ ]]`), never a PATH-resolved external matcher: the dialect surface collapses to the platform's own `regcomp`, over which the common subset above agrees, and no child whose resolution the hook cannot pin enters the verdict path. NUL-bearing content that git's content sniff sees is binary under the domain rule below and refused there; a NUL past the sniff window is stripped at the hook's line read — an error direction that can only join fragments into an over-match, never pass an intact secret unmeasured.
+*Rule source.* The pattern set is one committed data file, `.githooks/helpers/secret-patterns`, resolved from the **reading helper's own installed position** — the reader reads the file standing beside it in the working tree — because the bytes every reader must agree on are the committed repo file, and a reader that spelled the tier's directory against the ambient toplevel instead reads nothing at all wherever the tier is installed under another name. §3.6's worked application binds the egress scan to that same single committed file. The second reader is the egress consumer: it reads the same committed bytes, resolved from the runtime's own repository root, on the terms of its own prose block below. Format: one pattern per line as `id<TAB>ERE` — tab-delimited because a pattern may carry spaces — with blank lines and `#`-leading lines ignored, and a row's trailing carriage return stripped at the parse (a `core.autocrlf` checkout smudge would otherwise ride every ERE, which then compiles cleanly yet can never match an LF-terminated added line — an armed-looking scan that checks nothing; the file additionally ships a `-text` attribute so conversion never rewrites the committed bytes); IDs are lowercase-hyphen tokens, because the ID is what a refusal record carries. Patterns are constrained to the POSIX-ERE ∩ RegExp common subset — no backreferences or lookarounds, no backslash-letter classes, no POSIX bracket classes, explicit ranges only — so every committed line compiles for both readers; format extensions must be compatible extensions only (additions a current reader ignores, never a reinterpretation of existing lines), which is what bounds skew between the two readers of one file, since §3.6's second reader lands through its own cycle and the file changes between them. The tier-2 reader matches under `LC_ALL=C` byte semantics with the hook interpreter's own ERE engine (`[[ =~ ]]`), never a PATH-resolved external matcher: the dialect surface collapses to the platform's own `regcomp`, over which the common subset above agrees, and no child whose resolution the hook cannot pin enters the verdict path. NUL-bearing content that git's content sniff sees is binary under the domain rule below and refused there; a NUL past the sniff window is stripped at the hook's line read — an error direction that can only join fragments into an over-match, never pass an intact secret unmeasured.
 
 *Measurement domain.* The scan reads the **added text lines of the staged diff** — the index the row's deciding-information column names — per staged path: the path set from `git diff --cached --name-only -z`, each path then addressed with a `:(literal)` pathspec so no path byte is re-parsed as a pattern; the content read config-neutrally (`--no-ext-diff --no-textconv --no-color -U0`) and env-neutrally — the pathspec-magic environment family (`GIT_LITERAL_PATHSPECS` and its glob/noglob/icase siblings) is neutralized and replace-object grafting is disabled (`GIT_NO_REPLACE_OBJECTS`) around every git-diff child the scan runs — because neither a clone's diff configuration, nor an inherited environment, nor a local `refs/replace` graft must rewrite the measured object, how a path addresses it, or what the diff base resolves to — and every diff child's revision arguments are `--`-terminated so no worktree filename can make them ambiguous; added lines identified structurally from the diff's own shape, never by a bare prefix heuristic — a content line beginning `++` is content, not a header. Binary is keyed by outcome, not prose (§3.10): the numstat rendering that reports no line counts marks the path binary, and no localized "binary" message decides anything. The first commit of an unborn `HEAD`, where the staged diff has no parent to diff against, is keyed the same way — by outcome, diffing against the empty tree — never by guessing.
 
@@ -395,6 +395,27 @@ With P in hand, the boundary is total over what the adapter hands the predicate 
 *Named false-block costs (§3.6).* A diff legitimately quoting key-shaped strings — documentation, test fixtures — is over-blocked; the allow-list above is the live in-flow recovery. A routine binary asset is over-blocked by the unmeasurable-input arm; the same per-path recovery applies, with the tier's door beneath the refusal (§3.8).
 
 *Enumerated residuals, in place (§3.11).* The pattern read is a worktree read: a locally edited pattern file weakens the scan for that clone — accepted, because the advice tier's own door already grants that actor more. The allow-list read is a worktree read on the same terms, tracked or not, and its content the same commit can widen: a commit may allow-list its own leak — the same principal, the same door beneath, enumerated rather than instrumented. Entropy and heuristic detection stay out: the committed set is data, widening it is its own change, and a heuristic face is born advisory (§3.6).
+
+**`egress` publish-boundary semantics.** The class's decision is taken at tier 1, and this block is its prose home — the semantics the publish tool the row names (`gitjig_publish`) evaluates over every body it is asked to publish. Whether an instrument holds the home is the row's `home:` slot's own fact, recorded there and not restated here. This is the hardened stage §3.6's worked application committed to: the first publishing instrument ships the secret scan and the neutralization together, on that application's terms — the trigger, the owner, and the single-sourced pattern rule all bind here.
+
+*Rule source.* The pattern set is the same one committed data file the commit-time gate reads, `.githooks/helpers/secret-patterns` — this reader is the second reader that block names — resolved from the runtime's own repository root (§4.6), never from a caller-supplied location. Skew between the two readers of one file is bounded by the format rule already recorded above: patterns are constrained to the POSIX-ERE ∩ RegExp common subset, and format extensions are compatible extensions only. What converges the two implementations themselves — one in the hook's shell, one in the runtime, which cannot literally share code — is the shared conformance case set both are run against: that set is the lock §3.11's converged-implementations clause asks for, named here and not restated.
+
+*Measurement domain.* The gate measures the **exact bytes handed to the publish tool**: the body is composed into the call, never reconstructed from a command string — the exactness the row's deciding-information column claims for the session layer — and the destination arrives as the call's own structured argument, the actor making the target explicit rather than the gate inferring it from a proxy (§3.9's unverifiable-destination clause, satisfied by construction). The reading is an ordered pipeline. (1) A NUL-bearing body is **out-of-domain** and refuses (§3.9's measurement rule) — deliberately stricter than the commit-time scan's recorded NUL-join at the hook's line read: the same error direction, toward the block, with the joining strip declined because this gate's face is fail-closed where that tier's is advisory. (2) Unicode format characters (category Cf) are **stripped before matching**: a secret split by invisible bytes is not a skew between the two readers — both would pass it intact — so normalization in the over-match direction is the only closure; the false-block cost is named below. (3) Matching runs per line over the byte-domain reading of the stripped text, converged with the commit-time scan's `LC_ALL=C` byte semantics.
+
+*Outcomes.* The boundary is total in three dispositions, and the clean disposition's executor adds its own:
+
+- **Machinery degradation** → refused, content-free: the pattern file absent or unreadable at the resolved root, an up-front pattern-validation failure, or a set empty after stripping comments and blanks. This is the opposite face from the tier-2 scan's advisory disarm over the same failure shapes, and the divergence is by face, not by rule — §3.9's machinery carve-out is scoped to a gate's declared fail direction: the advice tier must not wedge git over machinery the actor did not cause, while here the guarded act is itself the irreversible publication, a disarmed allow hands unscanned bytes to an unretractable surface, and the refusal's cost is a withheld, retryable publish whose repair — a committed file — stands in the same working tree (§3.6).
+- **Unmeasurable input** → refused, content-free: the out-of-domain body above. The body is the actor's own and the repair is theirs — recompose and re-call, inside the session the refusal never left.
+- **Pattern match** → refused: the record carries pattern IDs and line locators and **never** the matched text or the body (§3.8's refusal-record rule; §5.5's reduced-record shape). The return channel is bound by §4.9's measured ground — a registered tool's result enters the run's transcript — and a result a composer may later relay stays content-free with respect to what the refusal withheld.
+- **Clean** → the publication runs through a bounded child whose success is keyed on **output validity, never exit status** (§3.10), all five of that section's outcome classes refusing admission: the delegate absent, a failed run, junk output, partial success, and the payload on the wrong stream. A failure record excludes the child's streams, which can echo request bodies. One further terminal outcome is owed — **outcome-unverified**, for post-send ambiguity: the send left the process and no valid outcome can be established, so the tool claims neither publication nor withholding; a withholding claim is made only where it can be known — §5.6's unconfirmable-publish-toward-silence direction.
+
+*Neutralization.* The relayed-side-effect obligation §3.6's worked application binds to this instrument runs on **its own pattern set** — mention shapes are not secret patterns: `@`-mentions, close-keyword + issue-reference pairs in their case variants, `GH-N` forms, URL-form issue references, and cross-repository references are each transformed to an inert spelling (backtick-wrapped), so republished text cannot page uninvolved parties or drive the platform's auto-close channel from inside a relayed body (§3.11's auto-close essential; §3.7(e)). One shape stays live as a **recorded decision**: the bare same-repository `#N`. It is the shell's own pointer idiom — the in-repo citation form §5.1 commits every durable artifact to — and neutralizing it would break every body this instrument publishes.
+
+*Named false-block cost (§3.6).* A body legitimately carrying format characters inside a secret-shaped span is over-blocked by the Cf strip, which joins what its author meant as inert. The in-flow recovery is defuse-and-recall: respell the span inertly and call the tool again — no repair commit and no escape needed, because the refused body never left the session.
+
+*Enumerated residuals, in place (§3.11).* A refused body persists in the run's session file as the tool call's own arguments — local state under §5.5's boundary, not a publication surface, enumerated rather than instrumented. Adversarially *encoded* payloads pass unrecognized: this tier is in-session mistake prevention, not a security boundary (§3.2). A span split across lines survives the per-line matching wherever a rendering boundary rejoins it. And the commit-time scan's own Cf allowance is that reader's residual, #39's to close, not this block's.
+
+*The door.* This boundary carries **no in-repo escape** — a declared deferral of §3.8's total-coverage rule, recorded here rather than left implied: until a door is designed on §3.8's terms, an over-blocked body's recovery is the defuse-and-recall above, and a publication this gate refuses is composed differently or not made. And the gate's reach ends at its call site: a publication composed outside the instrument is observed by no tier. What lies outside that reach is fixed by a **generating rule, never a roster** — every path that emits repo-derived text to a public, unretractable surface while running where no session exists — and §3.4's procedural obligation binds those paths: the redaction and neutralization obligations ride whatever composes the guarded act.
 
 The placement rule is itself **procedural** (§3.1 rule 1): it binds SPEC authorship, the two rightmost columns of the table above are its only product, and it is enforced at review (§2.3). §3.6's hardening-trigger obligation does not fire on it — that obligation binds irreversible-class norms, and a mis-placed row is a reversible document defect the next amendment repairs.
 

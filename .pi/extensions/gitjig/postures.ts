@@ -203,6 +203,58 @@ export const POSTURES: readonly PostureRow[] = [
 			"Present but cannot measure never vouches (§3.9's measurement rule; the carve-out covers the tier's machinery, not a live predicate's inputs): the staged input is the actor's own and the repair is theirs, the tier's --no-verify escape stands open beneath the refusal, and the refusal carries its own content-free cause distinct from a pattern match (§3.8's refusal-record rule).",
 	},
 	{
+		dependency: "egress-publish-patterns",
+		failureShape:
+			"pattern rule source unusable for the run — the committed pattern file absent or unreadable at the " +
+			"runtime's own repository root, an up-front pattern-validation failure (format or common-subset " +
+			"compile), or a set empty after stripping comments and blanks (SPEC §3.3's egress machinery outcome)",
+		posture: "closed",
+		justification:
+			"The same failure shapes the open secret-scan-patterns row disarms on, diverging by face, not by rule " +
+			"(§3.9's machinery carve-out is scoped to a gate's declared fail direction): the advice tier must not " +
+			"wedge git over machinery the actor did not cause, while here the guarded act is itself the " +
+			"irreversible publication — a disarmed allow hands unscanned bytes to an unretractable surface, and " +
+			"the refusal's cost is a withheld, retryable publish whose repair, a committed file, stands in the " +
+			"same working tree (§3.6's cost asymmetry).",
+	},
+	{
+		dependency: "egress-publish-measurement",
+		failureShape:
+			"live gate handed a body it cannot measure — a NUL-bearing body is out-of-domain for the " +
+			"line-and-pattern reading (SPEC §3.3's egress pipeline)",
+		posture: "closed",
+		justification:
+			"Present but cannot measure never vouches (§3.9's measurement rule): the body is the actor's own and " +
+			"the repair is theirs — recompose and re-call, inside the session the refusal never left. Deliberately " +
+			"stricter than the commit-time scan's recorded NUL-join at the hook's line read: the same error " +
+			"direction, toward the block, with the joining strip declined because this gate's face is fail-closed " +
+			"where that tier's is advisory (SPEC §3.3).",
+	},
+	{
+		dependency: "egress-publish-executor",
+		failureShape:
+			"the bounded publish child unusable by outcome — any of §3.10's five classes: the delegate absent, a " +
+			"failed run, junk output, partial success, or the payload on the wrong stream (SPEC §3.3's clean " +
+			"disposition)",
+		posture: "closed",
+		justification:
+			"A delegated result is admitted on output validity alone, never exit status and never a presence probe " +
+			"(§3.10's enumeration — a status-only test decides two of the five classes and silently accepts the " +
+			"rest); the failure record excludes the child's streams, which can echo request bodies (§5.5's " +
+			"reduced-record shape).",
+	},
+	{
+		dependency: "egress-publish-outcome",
+		failureShape:
+			"post-send ambiguity — the send left the process and no valid outcome can be established, so neither " +
+			"publication nor withholding is knowable (SPEC §3.3's outcome-unverified disposition)",
+		posture: "closed",
+		justification:
+			"Never a success claim over an unvalidated outcome (§3.10): the tool reports outcome-unverified and " +
+			"claims neither publication nor withholding — a withholding claim is made only where it can be known, " +
+			"§5.6's unconfirmable-publish-toward-silence direction.",
+	},
+	{
 		dependency: "seam-target",
 		failureShape:
 			"GITJIG_TEST_STATE_ROOT set but empty, relative, or not measurable as a directory by this account " +

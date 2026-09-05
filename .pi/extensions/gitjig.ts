@@ -20,11 +20,16 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { appendAuditRecord } from "./gitjig/audit.ts";
 import { maybeAdviseBindState } from "./gitjig/bind-state.ts";
 import { locateRepoRoot } from "./gitjig/locate.ts";
+import { registerPublishTool } from "./gitjig/publish/index.ts";
 import { resolveStateRoot } from "./gitjig/state-root.ts";
 
 export default function gitjig(pi: ExtensionAPI) {
 	const repoRoot = locateRepoRoot();
 	const { root: stateRoot, seamActive } = resolveStateRoot();
+
+	// The egress publish boundary (§3.3's egress row): registration is
+	// load-legal; every action the tool takes runs inside its execute.
+	registerPublishTool(pi, repoRoot, stateRoot);
 
 	// Every append outcome of this session, folded: false the moment any
 	// append degrades open. Reported on the registration entry below.
