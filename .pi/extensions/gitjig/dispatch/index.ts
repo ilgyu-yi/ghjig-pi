@@ -60,6 +60,17 @@ const REFUSE_BRIEF = "dispatch refused: the dispatch brief is not an admissible 
 /** Present-but-non-string expectedRef — refused, never coerced to undefined. */
 const REFUSE_EXPECTED_REF = "dispatch refused: the expected ref is present but not an admissible string";
 
+/**
+ * Present-but-inadmissible run bound — refused, never coerced. A bound is
+ * inadmissible unless it is a finite positive number: a string, a zero, a
+ * negative, a NaN or an infinity cannot bound a run, and resolving one of them
+ * to the default would hand the caller a bound they did not ask for while their
+ * own value reached nothing. That is the same silently-different-dispatch shape
+ * the sibling expectedRef guard refuses on, and one surface carries one rule
+ * (§2.7, §3.11).
+ */
+const REFUSE_TIMEOUT_MS = "dispatch refused: the run bound is present but not an admissible positive number of milliseconds";
+
 export type DispatchOutcome =
 	| { disposition: "admitted"; ok: boolean; summary: string; compare?: "confirmed" | "invalid" }
 	| { disposition: "refused"; cause: string };
@@ -174,6 +185,12 @@ const DISPATCH_PARAMS = {
 				"Optional ref name, resolved exactly once in the caller repository at provision; " +
 				"the return's reviewedHead is compared against the held hash and surfaces as validity alone.",
 		},
+		timeoutMs: {
+			type: "number",
+			description:
+				"Optional run bound in milliseconds for the delegate child; omitted runs at the default. " +
+				"A delegate that outlives its bound is terminated and nothing is admitted.",
+		},
 	},
 	required: ["brief", "delegateArgv"],
 	additionalProperties: false,
@@ -229,12 +246,25 @@ export function registerDispatchTool(pi: ExtensionAPI, repoRoot: string, stateRo
 				});
 				return result(REFUSE_EXPECTED_REF, { disposition: "refused" });
 			}
+			const timeoutMs: unknown = params.timeoutMs;
+			if (timeoutMs !== undefined && (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+				// The whole inadmissible set in one predicate, so no member falls
+				// through to a bound the caller did not name. Absent stays legal and
+				// takes the default — the reach is new, the floor is not.
+				appendAuditRecord(stateRoot, {
+					category: "dispatch",
+					action: "refuse-timeout-ms",
+					text: REFUSE_TIMEOUT_MS,
+				});
+				return result(REFUSE_TIMEOUT_MS, { disposition: "refused" });
+			}
 			const outcome = await runDispatch({
 				callerRepoRoot: repoRoot,
 				stateRoot,
 				brief,
 				delegateArgv: delegateArgv as string[],
 				expectedRef,
+				timeoutMs,
 			});
 			if (outcome.disposition === "refused") {
 				return result(outcome.cause, { disposition: "refused" });
