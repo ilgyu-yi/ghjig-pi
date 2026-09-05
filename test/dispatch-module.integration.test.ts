@@ -1,0 +1,1314 @@
+/**
+ * Module-level integration suite for the dispatch instrument (issue #88;
+ * SPEC §4.9 "The delegation layer" — home `.pi/extensions/gitjig/dispatch/`;
+ * §1.5 tree isolation; §1.6's pin-at-provision clause; §3.10's five-class
+ * fail-closed set; §3.9's content-free refusal records).
+ *
+ * The modules are imported DIRECTLY through a guarded dynamic import, and
+ * every arm's first assertion is the authored subject-absence anchor: the
+ * dispatch directory does not exist on this tree, so each arm reds on
+ * "nothing to measure" with its own message while every sibling suite
+ * survives (a top-level static import of a missing module would abort the
+ * whole file and erase the authored messages). Fixture repositories are
+ * minted inline — `mkdtemp` + `git init -q -b main` + per-command
+ * `-c user.name/-c user.email/-c commit.gpgsign=false` (the host has
+ * commit signing configured against an unsignable throwaway identity, so
+ * the gpgsign flag is mandatory on every commit, the delegate's included).
+ *
+ * AUTHORED PHASE-C CONTRACT (what these arms bind to):
+ *
+ *   `dispatch/provision.ts`
+ *     - `provisionDispatchContext(callerRepoRoot, { brief, expectedRef? })`
+ *       (sync or async — the suite awaits either): resolves the ref ONCE in
+ *       the caller's repository (`expectedRef` is a ref NAME; absent, the
+ *       caller's HEAD), holds the hash, `clone --no-hardlinks` into a
+ *       `mkdtempSync` scratch, `checkout --detach <held-hash>` — the
+ *       provisioned tree equals the held operand by construction (§4.9's
+ *       pin-at-provision paragraph). Scratch layout, path-pinned on the
+ *       returned context: `tree/  brief.md  return.json  state/` —
+ *       `treeDir`, `briefPath` (carrying the brief), `returnPath`,
+ *       `stateDir`, plus `scratchRoot` and the held `heldHash`.
+ *     - an `expectedRef` naming no object in the caller repository fails
+ *       LOUD (throws/rejects), never a silent context.
+ *     - `cleanupDispatchContext(context)` removes the scratch.
+ *
+ *   `dispatch/executor.ts`
+ *     - `runDelegate(context, argv, { timeoutMs? })` → `Promise<{ exitCode,
+ *       timedOut, spawnFailed }>`: a delegate-agnostic argv child, cwd
+ *       pinned to the provisioned tree, both streams drained, parent
+ *       environment passed through with the repo-locating and
+ *       config-injection `GIT_*` families removed and the one
+ *       state seam rebound —
+ *       `GITJIG_TEST_STATE_ROOT=<scratch>/state` (§5.5's disposable-root
+ *       carve-out, pointed inside the scratch).
+ *     - the delegate reaches the return file at `../return.json` from its
+ *       tree cwd — layout-derived, no second locator surface.
+ *
+ *   `dispatch/index.ts`
+ *     - `runDispatch({ callerRepoRoot, stateRoot, brief, delegateArgv,
+ *       expectedRef?, timeoutMs? })` → the composed pipeline (provision →
+ *       run → admit → cleanup in `finally`), returning either
+ *       `{ disposition: "admitted", ok, summary, compare? }` or
+ *       `{ disposition: "refused", cause }`; `registerDispatchTool` wraps
+ *       it (that registration surface is the sibling pi suite's subject).
+ *     - admission: `return.json` is the sole crossing; ≤ 64 KiB (an
+ *       oversize return is refused WHOLE, never truncated and admitted);
+ *       closed schema `{ok: boolean, summary: string, reviewedHead?}` —
+ *       unknown keys refused; §3.10's five outcome classes (delegate
+ *       absent, failed run, junk output, partial output, payload on the
+ *       wrong stream) each refuse on a fixed content-free cause.
+ *     - compare: a `reviewedHead` in the return is CONSUMED and surfaced
+ *       as validity alone — `compare: "confirmed"` iff it equals the held
+ *       hash, else `"invalid"` — and the return/failure channels stay
+ *       content-free with respect to the caller-held operands: every hex
+ *       run of ≥ 4 chars in the summary is lowercased, and a summary
+ *       carrying a run the held hash contains, or a run containing the
+ *       held 7-prefix, is REFUSED whole (the mechanical scan §4.9 grounds
+ *       in §3.9's content-free idiom).
+ *     - every refusal lands at least one `"category":"dispatch"` audit
+ *       record through the landed writer (`audit.ts`), itself content-free.
+ *
+ * WHAT THIS SUITE DOES NOT ESTABLISH. Concurrent-provision distinctness is
+ * BEHAVIORAL evidence of the mkdtemp primitive's exclusivity guarantee,
+ * never a proof of atomicity — three racing provisions landing three
+ * distinct paths is what the primitive promises, and this suite measures
+ * the promise's visible face only. The hex-run scan pins the MECHANICAL
+ * rule alone: a delegate paraphrasing the held hash in prose, or encoding
+ * it outside a hex run, is §4.9's injectable-context residual, not this
+ * suite's subject. The five §3.10 classes are staged by OUTCOME
+ * SHAPE, not cause — which syscall failed inside a shim is not measured,
+ * only what the dispatcher admitted. `clone --no-hardlinks` is asserted
+ * behaviorally (delegate mutations invisible to the caller), never as a
+ * flag spelling; the cleanup's degrade-open audit warn (an unremovable
+ * scratch) and the executor's two-timers-one-phase-each split are not
+ * staged. Isolation is measured against a MUTATING delegate that commits
+ * and writes in its clone, and against a PUSHING delegate whose push
+ * lands no ref in the caller repository.
+ *
+ * Mutants, both directions, per matcher: the pin arms hold a branch ref
+ * against an advanced HEAD and the default HEAD against itself, so a
+ * resolve-at-run-time mutant reddens at wrong-tree and a resolve-nothing
+ * mutant at the pin arms; admission drives valid → admitted AND every
+ * refusal class → refused, so always-admit and always-refuse both redden;
+ * the scan drives a held-hash prefix, the uppercased full hash, a 6-char
+ * prefix, and an interior 12-char substring → refused AND an unrelated
+ * hex run → admitted; compare drives a computed head → confirmed AND a
+ * misreported head → invalid. Control bytes ride generator escapes only — the
+ * stream-flood arm fills through `yes | head -c`, no literal control byte
+ * enters a script.
+ */
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join, sep } from "node:path";
+import { pathToFileURL } from "node:url";
+import { after, describe, it } from "node:test";
+import { repoRoot } from "./harness/run-pi.ts";
+
+const DISPATCH_DIR = join(repoRoot(), ".pi", "extensions", "gitjig", "dispatch");
+
+/** The authored red-anchor message every subject-absence arm carries. */
+function redUntilLanded(moduleName: string, arm: string, failure: string): string {
+	return (
+		`${arm}: red until the Code phase lands \`.pi/extensions/gitjig/dispatch/${moduleName}\` ` +
+		`(issue #88; SPEC §4.9's home clause) — the guarded dynamic import found nothing to measure: ${failure}`
+	);
+}
+
+// ---------------------------------------------------------------------------
+// The authored module contracts (types local to the suite: the modules do
+// not exist yet, so the suite carries the shapes it binds Phase C to).
+// ---------------------------------------------------------------------------
+
+interface DispatchContext {
+	scratchRoot: string;
+	treeDir: string;
+	briefPath: string;
+	returnPath: string;
+	stateDir: string;
+	heldHash: string;
+}
+
+interface ProvisionModule {
+	provisionDispatchContext(
+		callerRepoRoot: string,
+		options: { brief: string; expectedRef?: string },
+	): DispatchContext | Promise<DispatchContext>;
+	cleanupDispatchContext(context: DispatchContext): unknown;
+}
+
+interface ExecutorModule {
+	runDelegate(
+		context: DispatchContext,
+		argv: string[],
+		options?: { timeoutMs?: number },
+	): Promise<{ exitCode: number | null; timedOut: boolean; spawnFailed: boolean }>;
+}
+
+interface AdmitModule {
+	admitReturn(returnPath: string):
+		| { admitted: true; ok: boolean; summary: string; reviewedHead?: string }
+		| { admitted: false; cause: string };
+	REFUSAL_CAUSES: { delegateAbsent: string; missingReturn: string; malformedReturn: string };
+}
+
+type DispatchOutcome =
+	| { disposition: "admitted"; ok: boolean; summary: string; compare?: "confirmed" | "invalid" }
+	| { disposition: "refused"; cause: string };
+
+interface IndexModule {
+	runDispatch(options: {
+		callerRepoRoot: string;
+		stateRoot: string;
+		brief: string;
+		delegateArgv: string[];
+		expectedRef?: string;
+		timeoutMs?: number;
+	}): Promise<DispatchOutcome>;
+	registerDispatchTool(pi: unknown, repoRoot: string, stateRoot: string): void;
+	DISPATCH_TOOL_NAME: string;
+}
+
+type Imported<T> = { module: T } | { failure: string };
+
+async function importDispatch<T>(moduleName: string): Promise<Imported<T>> {
+	try {
+		return { module: (await import(pathToFileURL(join(DISPATCH_DIR, moduleName)).href)) as T };
+	} catch (error) {
+		return { failure: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+/** Import-or-red: the arm's subject-absence anchor, one call per module. */
+async function requireModule<T>(moduleName: string, arm: string): Promise<T> {
+	const loaded = await importDispatch<T>(moduleName);
+	assert.ok("module" in loaded, redUntilLanded(moduleName, arm, "failure" in loaded ? loaded.failure : ""));
+	return (loaded as { module: T }).module;
+}
+
+// ---------------------------------------------------------------------------
+// Inline fixture repositories (the harness is read-only; repos mint here).
+// ---------------------------------------------------------------------------
+
+const cleanups: string[] = [];
+
+after(() => {
+	for (const dir of cleanups) {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+function mintDir(prefix: string): string {
+	const dir = mkdtempSync(join(tmpdir(), prefix));
+	cleanups.push(dir);
+	return dir;
+}
+
+/** Throwaway identity + mandatory unsigned commits (measured host shape). */
+const GIT_FLAGS = ["-c", "user.name=zq", "-c", "user.email=zq@zq.zq", "-c", "commit.gpgsign=false"];
+
+function git(repo: string, ...args: string[]): string {
+	return execFileSync("git", ["-C", repo, ...GIT_FLAGS, ...args], { encoding: "utf8" });
+}
+
+function mintRepo(files: Record<string, string> = {}): string {
+	const repo = mintDir("gitjig-dispatch-caller-");
+	execFileSync("git", ["init", "-q", "-b", "main", repo], { encoding: "utf8" });
+	writeFileSync(join(repo, "zq-base.txt"), "zq base content\n");
+	for (const [name, content] of Object.entries(files)) {
+		writeFileSync(join(repo, name), content);
+	}
+	git(repo, "add", ".");
+	git(repo, "commit", "-q", "-m", "zq dispatch fixture commit");
+	return repo;
+}
+
+function headOf(repo: string): string {
+	return git(repo, "rev-parse", "HEAD").trim();
+}
+
+/** One more commit on the current branch; returns the new tip. */
+function advance(repo: string): string {
+	writeFileSync(join(repo, "zq-advance.txt"), "zq advanced content\n");
+	git(repo, "add", ".");
+	git(repo, "commit", "-q", "-m", "zq advance commit");
+	return headOf(repo);
+}
+
+const BRIEF = "zq dispatch brief: perform the staged act and write the bounded return";
+
+// ---------------------------------------------------------------------------
+// Committed return payloads (the delegate `cp`s them into ../return.json,
+// so every returned byte crossed as tree content, never as script quoting).
+// ---------------------------------------------------------------------------
+
+const RETURN_LIMIT = 64 * 1024;
+const CLEAN_SUMMARY = "zqdispatch clean bounded summary";
+const JUNK_MARKER = "ZQJUNKRETURNBYTES";
+const PARTIAL_MARKER = "ZQPARTIALRETURNBYTES";
+const UNKNOWN_MARKER = "ZQUNKNOWNKEYVALUE";
+const OVERSIZE_MARKER = "ZQOVERSIZERETURNMARK";
+const STREAM_MARKER = "ZQDELEGATESTREAMBYTES";
+const MISREPORTED_HEAD = "f".repeat(40);
+
+const PAYLOADS: Record<string, string> = {
+	"payload-valid.json": `{"ok":true,"summary":"${CLEAN_SUMMARY}"}`,
+	"payload-junk.json": `${JUNK_MARKER} not json at all\n`,
+	"payload-partial.json": `{"ok":true,"summary":"${PARTIAL_MARKER}`,
+	"payload-unknown.json": `{"ok":true,"summary":"zq","zqExtraKey":"${UNKNOWN_MARKER}"}`,
+	"payload-oversize.json": `{"ok":true,"summary":"${OVERSIZE_MARKER}${"z".repeat(RETURN_LIMIT)}"}`,
+	"payload-misreported-head.json":
+		`{"ok":true,"summary":"zqcompare misreported summary","reviewedHead":"${MISREPORTED_HEAD}"}`,
+	"payload-unrelated-hex.json": `{"ok":true,"summary":"zq run alongside deadbee7 stays inert"}`,
+};
+
+/** Delegate scripts, run as `sh -c` with cwd = the provisioned tree. */
+const COPY = (payload: string): string => `cp ${payload} ../return.json`;
+const SCRIPT_FAILED_RUN = `printf '%s' ${STREAM_MARKER}ERR >&2; exit 7`;
+const SCRIPT_WRONG_STREAM = `cat payload-valid.json && printf '%s' ${STREAM_MARKER}OUT`;
+const SCRIPT_REVIEWED_HEAD =
+	"printf '{\"ok\":true,\"summary\":\"zqcompare confirmed summary\",\"reviewedHead\":\"%s\"}' " +
+	'"$(git rev-parse HEAD)" > ../return.json';
+const SCRIPT_HELD_PREFIX =
+	"printf '{\"ok\":true,\"summary\":\"zq work landed at %s today\"}' " +
+	'"$(git rev-parse --short=7 HEAD)" > ../return.json';
+const SCRIPT_HELD_UPPER =
+	"printf '{\"ok\":true,\"summary\":\"zq work landed at %s today\"}' " +
+	'"$(git rev-parse HEAD | tr a-f A-F)" > ../return.json';
+const SCRIPT_HELD_SHORT6 =
+	"printf '{\"ok\":true,\"summary\":\"zq work landed at %s today\"}' " +
+	'"$(git rev-parse HEAD | cut -c1-6)" > ../return.json';
+const SCRIPT_HELD_INTERIOR =
+	"printf '{\"ok\":true,\"summary\":\"zq work landed at %s today\"}' " +
+	'"$(git rev-parse HEAD | cut -c15-26)" > ../return.json';
+const SCRIPT_MUTATE =
+	"printf 'zq intruder bytes' > zq-intruder.txt && git add zq-intruder.txt && " +
+	"git -c user.name=zq -c user.email=zq@zq.zq -c commit.gpgsign=false commit -q -m 'zq delegate commit' && " +
+	"git branch zq-delegate-branch && git rev-parse HEAD > zq-mutated-head";
+const SCRIPT_PUSH =
+	"printf 'zq pushed bytes' > zq-pushed.txt && git add zq-pushed.txt && " +
+	"git -c user.name=zq -c user.email=zq@zq.zq -c commit.gpgsign=false commit -q -m 'zq delegate push commit' && " +
+	"git rev-parse HEAD > zq-pushed-head; git push -q origin HEAD:refs/heads/zq-pushed-branch; true";
+const SCRIPT_OBSERVE_HEAD = "git rev-parse HEAD > zq-observed-head";
+const SCRIPT_GITDIR_PROBE =
+	"git update-ref refs/heads/zq-gitdir-pwn HEAD; " + 'printf \'%s\' "${GIT_DIR-zq-unset}" > zq-gitdir-capture';
+const SCRIPT_SEAM_CAPTURE = 'printf \'%s\' "$GITJIG_TEST_STATE_ROOT" > zq-seam-capture';
+const SCRIPT_STREAM_FLOOD = "yes zqstreamfill | head -c 3000000 && yes zqstreamfill | head -c 3000000 >&2";
+
+// ---------------------------------------------------------------------------
+// Audit + refusal helpers.
+// ---------------------------------------------------------------------------
+
+interface AuditSink {
+	stateRoot: string;
+	auditFile: string;
+}
+
+function mintStateRoot(): AuditSink {
+	const stateRoot = mintDir("gitjig-dispatch-state-");
+	return { stateRoot, auditFile: join(stateRoot, "audit.jsonl") };
+}
+
+function auditLines(sink: AuditSink): string[] {
+	if (!existsSync(sink.auditFile)) {
+		return [];
+	}
+	return readFileSync(sink.auditFile, "utf8").split("\n").filter((line) => line !== "");
+}
+
+function dispatchAuditLines(sink: AuditSink): string[] {
+	return auditLines(sink).filter((line) => line.includes('"category":"dispatch"'));
+}
+
+/**
+ * The refusal verdict every §3.10 class arm holds its outcome to: refused
+ * (never admitted, never truncated-into-admitted), a non-empty fixed cause,
+ * a `"category":"dispatch"` audit record, and every guarded byte string —
+ * delegate stream bytes, return-payload markers, the held-hash prefix —
+ * absent from the outcome AND the whole audit trail (§3.9's content-free
+ * refusal records; §4.9's content-free return channels).
+ */
+function assertRefusedContentFree(
+	outcome: DispatchOutcome,
+	sink: AuditSink,
+	guarded: Array<[string, string]>,
+	arm: string,
+): void {
+	assert.equal(
+		outcome.disposition,
+		"refused",
+		`${arm}: §3.10 admits on output validity alone and enumerates this outcome class as fail-closed — ` +
+			`the dispatch must refuse, got ${JSON.stringify(outcome)}`,
+	);
+	const cause = (outcome as { disposition: "refused"; cause: string }).cause;
+	assert.ok(
+		typeof cause === "string" && cause.length > 0,
+		`${arm}: the refusal carries no cause — a refusal owes its fixed content-free cause (§3.9, §3.11)`,
+	);
+	assert.ok(
+		dispatchAuditLines(sink).length >= 1,
+		`${arm}: no "category":"dispatch" audit record landed for the refusal — the dispatcher's acts ride the ` +
+			`landed writer (issue #88 authored contract; §5.5); audit: ${JSON.stringify(auditLines(sink))}`,
+	);
+	const outcomeBytes = JSON.stringify(outcome);
+	for (const [bytes, what] of guarded) {
+		assert.ok(
+			!outcomeBytes.includes(bytes),
+			`${arm}: ${what} ('${bytes.slice(0, 24)}') reached the dispatch outcome — the return and failure ` +
+				`channels are content-free (§4.9)`,
+		);
+		for (const line of auditLines(sink)) {
+			assert.ok(
+				!line.includes(bytes),
+				`${arm}: ${what} ('${bytes.slice(0, 24)}') reached the audit trail (§3.8's refusal-record rule)`,
+			);
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Provision: pin-at-provision, layout, loud absence, distinctness, cleanup.
+// ---------------------------------------------------------------------------
+
+describe("provision pins the tree at the once-resolved hash (issue #88, SPEC §4.9)", () => {
+	it("pin-with-expectedRef: the tree detaches at the ref's resolved hash, not the advanced branch tip", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "pin-with-expectedRef");
+		const repo = mintRepo();
+		git(repo, "branch", "zq-pin");
+		const pinned = headOf(repo);
+		const advanced = advance(repo);
+		assert.notEqual(pinned, advanced, "fixture defect: the advance commit did not move the branch tip");
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF, expectedRef: "zq-pin" });
+		cleanups.push(context.scratchRoot);
+		assert.equal(
+			context.heldHash,
+			pinned,
+			"pin-with-expectedRef: the held hash is not the caller-repository resolution of the named ref — " +
+				"provision resolves exactly once, in the caller's repository (§4.9 pin-at-provision)",
+		);
+		assert.equal(
+			git(context.treeDir, "rev-parse", "HEAD").trim(),
+			pinned,
+			"pin-with-expectedRef: the provisioned tree's HEAD is not the held hash — the tree must equal the " +
+				"held operand by construction (§4.9)",
+		);
+		assert.equal(
+			git(context.treeDir, "rev-parse", "--abbrev-ref", "HEAD").trim(),
+			"HEAD",
+			"pin-with-expectedRef: the tree is on a branch, not detached at the held hash — a branch re-resolves",
+		);
+	});
+
+	it("pin-default-HEAD: with no expectedRef the caller's HEAD is held and provisioned", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "pin-default-HEAD");
+		const repo = mintRepo();
+		const held = headOf(repo);
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		assert.equal(context.heldHash, held, "pin-default-HEAD: the held hash is not the caller's HEAD at provision");
+		assert.equal(
+			git(context.treeDir, "rev-parse", "HEAD").trim(),
+			held,
+			"pin-default-HEAD: the provisioned tree's HEAD is not the held hash (§4.9 pin-at-provision)",
+		);
+	});
+
+	it("layout: the scratch carries tree/, brief.md (the brief's bytes), state/, and the pinned return path", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "layout");
+		const repo = mintRepo();
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		assert.equal(context.treeDir, join(context.scratchRoot, "tree"), "layout: treeDir is not <scratch>/tree");
+		assert.equal(context.briefPath, join(context.scratchRoot, "brief.md"), "layout: briefPath is not <scratch>/brief.md");
+		assert.equal(
+			context.returnPath,
+			join(context.scratchRoot, "return.json"),
+			"layout: returnPath is not <scratch>/return.json — the sole crossing must sit at the layout's slot",
+		);
+		assert.equal(context.stateDir, join(context.scratchRoot, "state"), "layout: stateDir is not <scratch>/state");
+		assert.ok(statSync(context.treeDir).isDirectory(), "layout: tree/ is not a directory");
+		assert.ok(statSync(context.stateDir).isDirectory(), "layout: state/ is not a directory");
+		assert.equal(
+			readFileSync(context.briefPath, "utf8"),
+			BRIEF,
+			"layout: brief.md does not carry the dispatched brief's bytes (§1.5's dispatch-facts carrier)",
+		);
+	});
+
+	it("wrong-tree: the caller's branch advances after provision; the delegate still acts at the held hash", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "wrong-tree");
+		const executor = await requireModule<ExecutorModule>("executor.ts", "wrong-tree");
+		const repo = mintRepo();
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF, expectedRef: "main" });
+		cleanups.push(context.scratchRoot);
+		const held = context.heldHash;
+		const advanced = advance(repo);
+		assert.notEqual(held, advanced, "fixture defect: the post-provision advance did not move the branch");
+		const outcome = await executor.runDelegate(context, ["sh", "-c", SCRIPT_OBSERVE_HEAD], { timeoutMs: 30_000 });
+		assert.equal(outcome.exitCode, 0, "wrong-tree: the observing delegate failed to run");
+		assert.equal(
+			readFileSync(join(context.treeDir, "zq-observed-head"), "utf8").trim(),
+			held,
+			"wrong-tree: the delegate observed a HEAD other than the held hash — the pin binds at provision, " +
+				"and nothing at run time may re-resolve the ref (§4.9 pin-at-provision; §1.6)",
+		);
+	});
+
+	it("absent-object: an expectedRef naming nothing in the caller repository fails loud", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "absent-object");
+		const repo = mintRepo();
+		let refusal: unknown;
+		try {
+			const context = await provision.provisionDispatchContext(repo, { brief: BRIEF, expectedRef: "zq-absent-ref" });
+			cleanups.push(context.scratchRoot);
+		} catch (error) {
+			refusal = error;
+		}
+		assert.ok(
+			refusal !== undefined,
+			"absent-object: provision produced a context for a ref that resolves to nothing — an unresolvable " +
+				"expected head is ambiguity and fails loud, never a silently-provisioned tree (§3.9)",
+		);
+	});
+
+	it("concurrent provisions land distinct scratch paths (mkdtemp exclusivity, behavioral)", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "concurrency");
+		const repo = mintRepo();
+		const held = headOf(repo);
+		const contexts = await Promise.all([
+			provision.provisionDispatchContext(repo, { brief: BRIEF }),
+			provision.provisionDispatchContext(repo, { brief: BRIEF }),
+			provision.provisionDispatchContext(repo, { brief: BRIEF }),
+		]);
+		for (const context of contexts) {
+			cleanups.push(context.scratchRoot);
+		}
+		assert.equal(
+			new Set(contexts.map((context) => context.scratchRoot)).size,
+			3,
+			"concurrency: two provisions share a scratch path — mkdtemp's exclusive creation is the isolation " +
+				"floor two racing dispatches stand on (§1.5)",
+		);
+		for (const context of contexts) {
+			assert.equal(
+				git(context.treeDir, "rev-parse", "HEAD").trim(),
+				held,
+				"concurrency: a racing provision landed a tree off the held hash",
+			);
+		}
+	});
+
+	it("an inherited GIT_DIR cannot retarget provision's own git children at a bystander repository", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "gitdir-poisoned-provision");
+		const repo = mintRepo();
+		const held = headOf(repo);
+		// A distinct tree: two same-second fixtures with identical content
+		// would mint identical commit hashes and blunt the held-hash arm.
+		const bystander = mintRepo({ "zq-bystander.txt": "zq bystander content\n" });
+		git(bystander, "remote", "add", "origin", join(bystander, "zq-nowhere"));
+		const bystanderRefs = git(bystander, "for-each-ref");
+		// Provision runs in-process, so the poison rides the parent env the
+		// git children inherit; set/restore around the call, restore in finally.
+		const hadGitDir = Object.prototype.hasOwnProperty.call(process.env, "GIT_DIR");
+		const priorGitDir = process.env.GIT_DIR;
+		process.env.GIT_DIR = join(bystander, ".git");
+		let context: DispatchContext;
+		try {
+			context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		} finally {
+			if (hadGitDir) {
+				process.env.GIT_DIR = priorGitDir;
+			} else {
+				delete process.env.GIT_DIR;
+			}
+		}
+		cleanups.push(context.scratchRoot);
+		assert.equal(
+			git(bystander, "rev-parse", "--abbrev-ref", "HEAD").trim(),
+			"main",
+			"gitdir-poisoned-provision: the poisoning repository's HEAD is no longer symbolic at main — " +
+				"provision's own git children resolved the inherited GIT_DIR ahead of their -C target and " +
+				"detached a repository provision never owned (§1.5)",
+		);
+		assert.equal(
+			git(bystander, "remote"),
+			"origin\n",
+			"gitdir-poisoned-provision: the poisoning repository's remotes changed — provision's origin sever " +
+				"landed in the wrong repository under an inherited GIT_DIR (§1.5)",
+		);
+		assert.equal(
+			git(bystander, "for-each-ref"),
+			bystanderRefs,
+			"gitdir-poisoned-provision: the poisoning repository's refs changed under a poisoned provision (§1.5)",
+		);
+		assert.equal(
+			context.heldHash,
+			held,
+			"gitdir-poisoned-provision: the held hash is not the caller's HEAD — an inherited GIT_DIR retargeted " +
+				"the once-resolved pin at another repository (§4.9 pin-at-provision)",
+		);
+		assert.equal(
+			git(context.treeDir, "remote"),
+			"",
+			"gitdir-poisoned-provision: the clone's origin remote is still standing — the sever ran against the " +
+				"poisoning repository instead, leaving the route back to the caller open (§1.5)",
+		);
+	});
+
+	it("an injected core.hooksPath cannot make provision's own git children run an attacker hook against the caller tree", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "config-poisoned-provision");
+		const repo = mintRepo({ "zq-guarded.txt": "zq caller content\n" });
+		const held = headOf(repo);
+		const callerBefore = readFileSync(join(repo, "zq-guarded.txt"), "utf8");
+		// The injected hook writes a scratch sentinel AND overwrites the
+		// caller's tracked file — either effect is a caller-integrity breach
+		// by provision's own child under the config-injection env channel.
+		const hooksDir = mintDir("gitjig-dispatch-hooks-");
+		const sentinel = join(mintDir("gitjig-dispatch-sentinel-"), "zq-provision-hook-fired");
+		writeFileSync(
+			join(hooksDir, "post-checkout"),
+			`#!/bin/sh\ntouch '${sentinel}'\nprintf 'zq hook overwrote the caller\\n' > '${join(repo, "zq-guarded.txt")}'\n`,
+		);
+		execFileSync("chmod", ["+x", join(hooksDir, "post-checkout")], { encoding: "utf8" });
+		// The poison rides the parent env as git's documented config-injection
+		// channel (GIT_CONFIG_COUNT + indexed KEY/VALUE pair) — git honors
+		// core.hooksPath from this channel, so provision's own clone+checkout
+		// would run the hook. Set/restore around the in-process call.
+		const configKeys = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"] as const;
+		const prior = new Map<string, string | undefined>(configKeys.map((key) => [key, process.env[key]]));
+		process.env.GIT_CONFIG_COUNT = "1";
+		process.env.GIT_CONFIG_KEY_0 = "core.hooksPath";
+		process.env.GIT_CONFIG_VALUE_0 = hooksDir;
+		let context: DispatchContext;
+		try {
+			context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		} finally {
+			for (const key of configKeys) {
+				const value = prior.get(key);
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+		}
+		cleanups.push(context.scratchRoot);
+		assert.ok(
+			!existsSync(sentinel),
+			"config-poisoned-provision: provision's own git children ran an attacker hook — an inherited " +
+				"GIT_CONFIG_COUNT carried core.hooksPath into the clone+checkout, so a config-injection env " +
+				"channel executed code inside provision (§1.5)",
+		);
+		assert.equal(
+			readFileSync(join(repo, "zq-guarded.txt"), "utf8"),
+			callerBefore,
+			"config-poisoned-provision: the caller's working file was rewritten by a provision-run hook — a " +
+				"silent caller-tree write on a green provision (§1.5)",
+		);
+		assert.equal(context.heldHash, held, "config-poisoned-provision: the held hash is not the caller's HEAD");
+		assert.equal(
+			git(context.treeDir, "rev-parse", "HEAD").trim(),
+			held,
+			"config-poisoned-provision: the clone is not detached at the held hash (§4.9 pin-at-provision)",
+		);
+	});
+
+	it("cleanup removes the scratch", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "cleanup");
+		const repo = mintRepo();
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		assert.ok(existsSync(context.scratchRoot), "cleanup: no scratch to remove — provision produced nothing");
+		await provision.cleanupDispatchContext(context);
+		assert.ok(
+			!existsSync(context.scratchRoot),
+			"cleanup: the scratch survives — a dispatch that accumulates clones leaks the caller's history " +
+				"into an unmanaged surface (§1.5's bounded distillation; §4.9)",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Isolation: the delegate's acts stay inside its clone.
+// ---------------------------------------------------------------------------
+
+describe("a mutating delegate is invisible to the caller repository (issue #88, SPEC §1.5)", () => {
+	it("delegate commits, writes, and branches in its clone; the caller's tree AND refs are unchanged", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "mutation-invisibility");
+		const executor = await requireModule<ExecutorModule>("executor.ts", "mutation-invisibility");
+		const repo = mintRepo();
+		const held = headOf(repo);
+		const refsBefore = git(repo, "for-each-ref");
+		const porcelainBefore = git(repo, "status", "--porcelain");
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		const outcome = await executor.runDelegate(context, ["sh", "-c", SCRIPT_MUTATE], { timeoutMs: 30_000 });
+		assert.equal(outcome.exitCode, 0, "mutation-invisibility: the mutating delegate failed — the arm is vacuous");
+		assert.notEqual(
+			readFileSync(join(context.treeDir, "zq-mutated-head"), "utf8").trim(),
+			held,
+			"mutation-invisibility: the delegate's commit did not land in its clone — the arm is vacuous",
+		);
+		assert.equal(
+			headOf(repo),
+			held,
+			"mutation-invisibility: the caller's HEAD moved — the delegate's commit escaped its clone (§1.5)",
+		);
+		assert.equal(
+			git(repo, "for-each-ref"),
+			refsBefore,
+			"mutation-invisibility: the caller's refs changed — a delegate branch or commit crossed the isolation " +
+				"boundary (§1.5; the clone is the delegate's local writable world)",
+		);
+		assert.equal(
+			git(repo, "status", "--porcelain"),
+			porcelainBefore,
+			"mutation-invisibility: the caller's working tree changed under a dispatched delegate (§1.5)",
+		);
+	});
+
+	it("delegate commits and pushes to its origin remote; no ref lands in the caller repository", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "push-invisibility");
+		const executor = await requireModule<ExecutorModule>("executor.ts", "push-invisibility");
+		const repo = mintRepo();
+		const held = headOf(repo);
+		const refsBefore = git(repo, "for-each-ref");
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		const outcome = await executor.runDelegate(context, ["sh", "-c", SCRIPT_PUSH], { timeoutMs: 30_000 });
+		assert.equal(outcome.exitCode, 0, "push-invisibility: the pushing delegate wedged — the arm is vacuous");
+		assert.notEqual(
+			readFileSync(join(context.treeDir, "zq-pushed-head"), "utf8").trim(),
+			held,
+			"push-invisibility: the delegate's commit did not land in its clone — the arm is vacuous",
+		);
+		assert.equal(
+			git(repo, "for-each-ref"),
+			refsBefore,
+			"push-invisibility: a delegate push landed a ref in the caller repository — the clone's origin " +
+				"remote is a route back across the isolation boundary, and provision severs it (§1.5)",
+		);
+		assert.equal(headOf(repo), held, "push-invisibility: the caller's HEAD moved under a delegate push (§1.5)");
+	});
+
+	it("the clone's metadata names no route back: .git/logs is absent and the caller path is unrecoverable", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "reflog-removed");
+		const repo = mintRepo();
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		assert.ok(
+			!existsSync(join(context.treeDir, ".git", "logs")),
+			"reflog-removed: the clone's .git/logs survives provision — the reflog records `clone: from " +
+				"<caller-path>`, and a delegate mining that path can push a ref straight into the caller " +
+				"repository by path, origin sever notwithstanding (§1.5)",
+		);
+		// The caller repo's mkdtemp basename is unique to this fixture, so a
+		// clean grep over the whole clone metadata is the caller path's absence.
+		let matched = "";
+		try {
+			matched = execFileSync("grep", ["-rl", "--", basename(repo), join(context.treeDir, ".git")], {
+				encoding: "utf8",
+			});
+		} catch {
+			// grep exits 1 on no match: no clone-metadata file names the caller path.
+		}
+		assert.equal(
+			matched,
+			"",
+			`reflog-removed: clone metadata still names the caller path — a mineable route back (§1.5): ${matched}`,
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Executor: drained streams; the state seam inside the scratch.
+// ---------------------------------------------------------------------------
+
+describe("the executor's child is drained and seam-scoped (issue #88, SPEC §4.9)", () => {
+	it("streams drained: a delegate flooding both streams completes instead of wedging on a full pipe", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "streams-drained");
+		const executor = await requireModule<ExecutorModule>("executor.ts", "streams-drained");
+		const repo = mintRepo();
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		const outcome = await executor.runDelegate(context, ["sh", "-c", SCRIPT_STREAM_FLOOD], { timeoutMs: 60_000 });
+		assert.equal(
+			outcome.timedOut,
+			false,
+			"streams-drained: the flooding delegate hit the bound — an undrained pipe wedges the child at the " +
+				"kernel buffer and the timer converts a deadlock into a timeout instead of a run (§4.9)",
+		);
+		assert.equal(outcome.exitCode, 0, "streams-drained: the flooding delegate did not complete cleanly");
+	});
+
+	it("the delegate's state seam points at <scratch>/state, inside the scratch", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "state-seam");
+		const executor = await requireModule<ExecutorModule>("executor.ts", "state-seam");
+		const repo = mintRepo();
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		const outcome = await executor.runDelegate(context, ["sh", "-c", SCRIPT_SEAM_CAPTURE], { timeoutMs: 30_000 });
+		assert.equal(outcome.exitCode, 0, "state-seam: the capturing delegate failed to run");
+		const captured = readFileSync(join(context.treeDir, "zq-seam-capture"), "utf8");
+		assert.equal(
+			captured,
+			context.stateDir,
+			"state-seam: the delegate's GITJIG_TEST_STATE_ROOT is not the context's state dir — a delegate " +
+				"writing shell state anywhere but the scratch pollutes the caller's evidence surface (§5.5)",
+		);
+		assert.ok(
+			captured.startsWith(context.scratchRoot + sep),
+			"state-seam: the seam target sits outside the scratch — the delegate's state must die with the " +
+				"dispatch (§5.5's disposable-root carve-out)",
+		);
+	});
+
+	it("an inherited GIT_DIR cannot retarget the delegate's writes at the caller repository", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "gitdir-egress");
+		const executor = await requireModule<ExecutorModule>("executor.ts", "gitdir-egress");
+		const repo = mintRepo();
+		const refsBefore = git(repo, "for-each-ref");
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		const hadGitDir = Object.prototype.hasOwnProperty.call(process.env, "GIT_DIR");
+		const priorGitDir = process.env.GIT_DIR;
+		process.env.GIT_DIR = join(repo, ".git");
+		let outcome: { exitCode: number | null; timedOut: boolean };
+		try {
+			outcome = await executor.runDelegate(context, ["sh", "-c", SCRIPT_GITDIR_PROBE], { timeoutMs: 30_000 });
+		} finally {
+			if (hadGitDir) {
+				process.env.GIT_DIR = priorGitDir;
+			} else {
+				delete process.env.GIT_DIR;
+			}
+		}
+		assert.equal(outcome.exitCode, 0, "gitdir-egress: the probing delegate failed to run — the arm is vacuous");
+		assert.equal(
+			readFileSync(join(context.treeDir, "zq-gitdir-capture"), "utf8"),
+			"zq-unset",
+			"gitdir-egress: GIT_DIR reached the delegate's environment — git resolves the repo-locating GIT_* " +
+				"family ahead of cwd, so an inherited one retargets every delegate git write at the caller " +
+				"repository despite the pinned cwd (§1.5)",
+		);
+		assert.equal(
+			git(repo, "for-each-ref"),
+			refsBefore,
+			"gitdir-egress: a delegate write landed a ref in the caller repository under an inherited GIT_DIR — " +
+				"the cwd pin is not the repo pin (§1.5)",
+		);
+	});
+
+	it("an empty-string argv entry settles spawnFailed and refuses on the delegate-absent cause", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "spawn-throw");
+		const executor = await requireModule<ExecutorModule>("executor.ts", "spawn-throw");
+		const admit = await requireModule<AdmitModule>("admit.ts", "spawn-throw");
+		const index = await requireModule<IndexModule>("index.ts", "spawn-throw");
+		const repo = mintRepo();
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		// The tool-surface argv guard admits [""] (a non-empty array of
+		// strings), so the synchronous spawn throw must SETTLE into the
+		// closed outcome set — a raw rejection escapes §3.10's taxonomy.
+		const run = await executor.runDelegate(context, [""], { timeoutMs: 5_000 });
+		assert.deepEqual(
+			run,
+			{ exitCode: null, timedOut: false, spawnFailed: true },
+			"spawn-throw: a synchronous spawn throw did not settle { exitCode: null, timedOut: false, " +
+				"spawnFailed: true } — the child never started, which is §3.10's delegate-absent class, " +
+				"never an escaped rejection",
+		);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: [""],
+			timeoutMs: 5_000,
+		});
+		assert.equal(
+			outcome.disposition,
+			"refused",
+			`spawn-throw: the dispatch did not refuse an unspawnable argv: ${JSON.stringify(outcome)}`,
+		);
+		assert.equal(
+			(outcome as { cause: string }).cause,
+			admit.REFUSAL_CAUSES.delegateAbsent,
+			"spawn-throw: the refusal did not ride the fixed delegate-absent cause — every refusal crosses on a " +
+				"fixed content-free literal (§3.9, §3.10)",
+		);
+		assert.ok(
+			dispatchAuditLines(sink).length >= 1,
+			'spawn-throw: no "category":"dispatch" audit record landed — every dispatch act lands at least one ' +
+				`record through the landed writer (§5.5); audit: ${JSON.stringify(auditLines(sink))}`,
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Admission: the bounded return, both directions.
+// ---------------------------------------------------------------------------
+
+describe("admission: return.json is the sole, bounded, closed-schema crossing (issue #88, SPEC §3.10)", () => {
+	it("a valid return is admitted with its summary intact (the allow direction)", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "valid-return");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-valid.json")],
+			timeoutMs: 30_000,
+		});
+		assert.equal(
+			outcome.disposition,
+			"admitted",
+			`valid-return: a well-formed in-schema return was refused — an always-refuse dispatcher is the ` +
+				`mutant this direction kills (§3.10): ${JSON.stringify(outcome)}`,
+		);
+		const admitted = outcome as { disposition: "admitted"; ok: boolean; summary: string };
+		assert.equal(admitted.ok, true, "valid-return: the return's ok flag did not survive admission");
+		assert.equal(admitted.summary, CLEAN_SUMMARY, "valid-return: the bounded summary did not cross back intact");
+		assert.ok(
+			!JSON.stringify(outcome).includes(held.slice(0, 7)),
+			"valid-return: the admitted outcome carries the held hash — the return channel is content-free " +
+				"with respect to caller-held operands (§4.9)",
+		);
+	});
+
+	it("an oversize return (> 64 KiB) is refused whole, never truncated into an admission", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "oversize-return");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-oversize.json")],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[
+				[OVERSIZE_MARKER, "the oversize return's bytes"],
+				[headOf(repo).slice(0, 7), "the held hash's prefix"],
+			],
+			"oversize-return",
+		);
+	});
+
+	it("§3.10 junk output: a non-JSON return refuses on a fixed content-free cause", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "junk-return");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-junk.json")],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[
+				[JUNK_MARKER, "the junk return's bytes"],
+				[headOf(repo).slice(0, 7), "the held hash's prefix"],
+			],
+			"junk-return",
+		);
+	});
+
+	it("§3.10 partial output: a truncated return refuses — a weaker parse is a second implementation", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "partial-return");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-partial.json")],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[
+				[PARTIAL_MARKER, "the partial return's bytes"],
+				[headOf(repo).slice(0, 7), "the held hash's prefix"],
+			],
+			"partial-return",
+		);
+	});
+
+	it("an unknown key refuses — the schema is closed, not minimum-matched", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "unknown-key");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-unknown.json")],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[
+				[UNKNOWN_MARKER, "the unknown key's value bytes"],
+				[headOf(repo).slice(0, 7), "the held hash's prefix"],
+			],
+			"unknown-key",
+		);
+	});
+
+	it("fifo-slot: a FIFO planted at the return slot refuses malformedReturn without wedging the admit", { timeout: 30_000 }, async () => {
+		const admit = await requireModule<AdmitModule>("admit.ts", "fifo-slot");
+		const slot = join(mintDir("gitjig-dispatch-slot-"), "return.json");
+		execFileSync("mkfifo", [slot]);
+		const verdict = admit.admitReturn(slot);
+		assert.ok(!verdict.admitted, "fifo-slot: a FIFO at the return slot was admitted — the slot is not a return");
+		assert.equal(
+			(verdict as { cause: string }).cause,
+			admit.REFUSAL_CAUSES.malformedReturn,
+			"fifo-slot: the FIFO did not refuse on the malformed cause — the regular-file verdict precedes any " +
+				"read, because a blocking open on a FIFO freezes the synchronous admit inside the extension " +
+				"host, where no timer can fire (§3.10's fail-closed set)",
+		);
+	});
+
+	it("symlink-slot: a symlinked return slot refuses malformedReturn — the link is judged, never followed", async () => {
+		const admit = await requireModule<AdmitModule>("admit.ts", "symlink-slot");
+		const slot = join(mintDir("gitjig-dispatch-slot-"), "return.json");
+		symlinkSync("/dev/zero", slot);
+		const verdict = admit.admitReturn(slot);
+		assert.ok(!verdict.admitted, "symlink-slot: a symlinked return slot was admitted");
+		assert.equal(
+			(verdict as { cause: string }).cause,
+			admit.REFUSAL_CAUSES.malformedReturn,
+			"symlink-slot: the symlink did not refuse on the malformed cause — a followed link puts the size " +
+				"gate on the target (a device reads unbounded), so the slot's own lstat type decides (§3.10)",
+		);
+	});
+
+	it("§3.10 failed run: a non-zero delegate writing no return refuses, its streams excluded", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "failed-run");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SCRIPT_FAILED_RUN],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[
+				[STREAM_MARKER, "delegate stream bytes"],
+				[headOf(repo).slice(0, 7), "the held hash's prefix"],
+			],
+			"failed-run",
+		);
+	});
+
+	it("§3.10 delegate absent: an unspawnable delegate refuses with a record, never a wedge", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "delegate-absent");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: [join(repo, "zq-absent-delegate")],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(outcome, sink, [[headOf(repo).slice(0, 7), "the held hash's prefix"]], "delegate-absent");
+	});
+
+	it("§3.10 wrong stream: a valid return printed on stdout is not the crossing — refused", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "wrong-stream");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SCRIPT_WRONG_STREAM],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[
+				[STREAM_MARKER, "delegate stream bytes"],
+				[CLEAN_SUMMARY, "the stream-borne summary's bytes"],
+				[headOf(repo).slice(0, 7), "the held hash's prefix"],
+			],
+			"wrong-stream",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Compare + the outgoing-surface operand scan, both directions each.
+// ---------------------------------------------------------------------------
+
+describe("the blind compare and the operand scan (issue #88, SPEC §4.9, §1.6)", () => {
+	it("a reviewedHead equal to the held hash surfaces compare 'confirmed', naming no operand", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "compare-confirmed");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SCRIPT_REVIEWED_HEAD],
+			expectedRef: "main",
+			timeoutMs: 30_000,
+		});
+		assert.equal(
+			outcome.disposition,
+			"admitted",
+			`compare-confirmed: the in-schema return was refused: ${JSON.stringify(outcome)}`,
+		);
+		assert.equal(
+			(outcome as { compare?: string }).compare,
+			"confirmed",
+			"compare-confirmed: a reviewedHead equal to the held hash did not surface as 'confirmed' — the " +
+				"caller consumes validity, never the operand pair (§1.6's blind compare via §4.9)",
+		);
+		assert.ok(
+			!JSON.stringify(outcome).includes(held.slice(0, 7)),
+			"compare-confirmed: the outcome names the held operand — the compare crosses back as validity " +
+				"alone (§4.9's content-free return channels)",
+		);
+	});
+
+	it("a misreported reviewedHead surfaces compare 'invalid' — never tree drift, and neither value crosses", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "compare-invalid");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		assert.ok(
+			!held.startsWith(MISREPORTED_HEAD.slice(0, 7)),
+			"compare-invalid: improbable fixture collision — the minted head shares the staged operand's prefix; re-run",
+		);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-misreported-head.json")],
+			expectedRef: "main",
+			timeoutMs: 30_000,
+		});
+		assert.equal(
+			outcome.disposition,
+			"admitted",
+			`compare-invalid: the in-schema return was refused outright — the compare's verdict, not a schema ` +
+				`refusal, is what the merge-review row consumes: ${JSON.stringify(outcome)}`,
+		);
+		assert.equal(
+			(outcome as { compare?: string }).compare,
+			"invalid",
+			"compare-invalid: a reviewedHead differing from the held hash did not surface as 'invalid' — with " +
+				"the tree pinned at provision, a misreported return is the ONLY way this compare can fail, and " +
+				"an always-confirmed dispatcher forges the merge-review row's evidence (§4.9, §3.3)",
+		);
+		const outcomeBytes = JSON.stringify(outcome);
+		assert.ok(
+			!outcomeBytes.includes(held.slice(0, 7)) && !outcomeBytes.includes(MISREPORTED_HEAD.slice(0, 7)),
+			"compare-invalid: the outcome names a compare operand — validity alone crosses back, never either " +
+				"value (§4.9's content-free return channels)",
+		);
+	});
+
+	it("a summary carrying a ≥7-hex prefix of the held hash is refused whole (the scan's refuse direction)", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "held-prefix-scan");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SCRIPT_HELD_PREFIX],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[[held.slice(0, 7), "the held hash's prefix"]],
+			"held-prefix-scan",
+		);
+	});
+
+	it("a summary carrying the UPPERCASED full held hash is refused whole — git resolves uppercased hashes", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "held-upper-scan");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SCRIPT_HELD_UPPER],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[
+				[held.slice(0, 7), "the held hash's prefix"],
+				[held.toUpperCase().slice(0, 7), "the held hash's uppercased prefix"],
+			],
+			"held-upper-scan",
+		);
+	});
+
+	it("a summary carrying a 6-char prefix of the held hash is refused whole", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "held-short6-scan");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SCRIPT_HELD_SHORT6],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[[held.slice(0, 6), "the held hash's 6-char prefix"]],
+			"held-short6-scan",
+		);
+	});
+
+	it("a summary carrying an interior 12-char substring of the held hash is refused whole", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "held-interior-scan");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", SCRIPT_HELD_INTERIOR],
+			timeoutMs: 30_000,
+		});
+		assertRefusedContentFree(
+			outcome,
+			sink,
+			[[held.slice(14, 26), "an interior substring of the held hash"]],
+			"held-interior-scan",
+		);
+	});
+
+	it("an unrelated 7-hex run in the summary is admitted (the scan's allow direction)", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "unrelated-hex");
+		const repo = mintRepo(PAYLOADS);
+		const held = headOf(repo);
+		assert.ok(
+			!held.startsWith("deadbee"),
+			"unrelated-hex: improbable fixture collision — the minted head starts with the staged hex run; re-run",
+		);
+		const sink = mintStateRoot();
+		const outcome = await index.runDispatch({
+			callerRepoRoot: repo,
+			stateRoot: sink.stateRoot,
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-unrelated-hex.json")],
+			timeoutMs: 30_000,
+		});
+		assert.equal(
+			outcome.disposition,
+			"admitted",
+			`unrelated-hex: a summary whose hex run prefixes nothing the caller holds was refused — the scan ` +
+				`pins the held operand, not hex at large, and an over-blocking scan makes every hash-adjacent ` +
+				`summary undeliverable (§3.11's recoverable-false-block asymmetry still costs a round): ` +
+				`${JSON.stringify(outcome)}`,
+		);
+		assert.equal(
+			(outcome as { summary?: string }).summary,
+			"zq run alongside deadbee7 stays inert",
+			"unrelated-hex: the admitted summary did not cross back intact",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Tool surface: no parameter is coerced — present-but-wrong-typed refuses.
+// ---------------------------------------------------------------------------
+
+describe("the tool surface refuses a present-but-non-string expectedRef (issue #88, SPEC §4.9)", () => {
+	/** The registered tool's execute shape, captured through a fake pi. */
+	interface RegisteredTool {
+		execute(
+			toolCallId: string,
+			params: Record<string, unknown>,
+		): Promise<{ content: Array<{ type: string; text: string }>; details: Record<string, unknown> }>;
+	}
+
+	it("expectedRef: 123 refuses on a fixed cause with an audit record — never a coerced non-compare dispatch", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "expectedref-type");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		let registered: RegisteredTool | undefined;
+		index.registerDispatchTool({ registerTool: (spec: unknown) => (registered = spec as RegisteredTool) }, repo, sink.stateRoot);
+		assert.ok(registered !== undefined, "expectedref-type: registerDispatchTool registered no tool — the arm is vacuous");
+		const result = await registered.execute("zq-toolcall", {
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-valid.json")],
+			expectedRef: 123,
+		});
+		assert.equal(
+			result.details.disposition,
+			"refused",
+			"expectedref-type: a present-but-non-string expectedRef was not refused — it coerces into a silently " +
+				"different dispatch (the pin flips to HEAD, the compare goes absent) while the sibling brief guard " +
+				`refuses loud, and the tool surface's rule is no coercion (§4.9): ${JSON.stringify(result)}`,
+		);
+		assert.ok(
+			!JSON.stringify(result).includes("123"),
+			"expectedref-type: the refusal names the rejected value — the cause is a fixed content-free literal (§3.9)",
+		);
+		assert.ok(
+			dispatchAuditLines(sink).some((line) => line.includes('"action":"refuse-expected-ref"')),
+			'expectedref-type: no "category":"dispatch" refuse-expected-ref audit record landed — every refusal ' +
+				`lands its record through the landed writer (§5.5); audit: ${JSON.stringify(auditLines(sink))}`,
+		);
+	});
+
+	it("an absent expectedRef stays legal: a non-compare dispatch admits with no compare clause", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "expectedref-absent");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		let registered: RegisteredTool | undefined;
+		index.registerDispatchTool({ registerTool: (spec: unknown) => (registered = spec as RegisteredTool) }, repo, sink.stateRoot);
+		assert.ok(registered !== undefined, "expectedref-absent: registerDispatchTool registered no tool — the arm is vacuous");
+		const result = await registered.execute("zq-toolcall", {
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-valid.json")],
+		});
+		assert.equal(
+			result.details.disposition,
+			"admitted",
+			"expectedref-absent: a dispatch with no expectedRef was refused — only present-but-wrong-typed " +
+				`refuses; absence is the legal non-compare dispatch (§4.9): ${JSON.stringify(result)}`,
+		);
+		assert.ok(
+			!("compare" in result.details),
+			"expectedref-absent: a compare verdict surfaced with no expectedRef — the compare rides only a " +
+				"caller-named expected head (§1.6 via §4.9)",
+		);
+	});
+});
