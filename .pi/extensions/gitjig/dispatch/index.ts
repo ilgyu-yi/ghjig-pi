@@ -20,7 +20,10 @@
  * lowercased, and the return is refused whole with a fixed cause iff the
  * held hash contains the run or the run contains the held 7-prefix (§4.9
  * grounding in §3.9's content-free idiom; a paraphrased or re-encoded
- * operand is §4.9's injectable-context residual, not this scan's catch).
+ * operand is §4.9's injectable-context residual, not this scan's catch —
+ * and the containment branch covers the held 7-prefix embedded in a
+ * longer run, not an arbitrary interior slice padded into one, which
+ * rides the same residual).
  *
  * Every dispatch act — admission and each refusal — lands at least one
  * `category:"dispatch"` record through the landed audit writer,

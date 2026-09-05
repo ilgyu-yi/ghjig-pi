@@ -46,22 +46,23 @@
  * an operand; the dispatch act lands at least one `"category":"dispatch"`
  * audit record through the landed writer; the executor passes the parent
  * environment through (the child `pi` needs the parent's PATH/HOME/
- * PI_OFFLINE isolation) with only the state seam rebound into the
- * scratch.
+ * PI_OFFLINE isolation) with the repo-locating `GIT_*` family removed
+ * and the state seam rebound into the scratch.
  *
  * WHAT THIS SUITE DOES NOT ESTABLISH. The round trip proves the
  * DISPATCHER's provision → child-session → bounded-return path, never any
  * delegate's quality: the child is a scripted echo, and a green run says
  * nothing about what a real delegate would do with the brief. The
- * operand-absence sweep is LEXICAL over lowercase hex runs on the
- * surfaces read here — the tool's result entries, the audit trail, and
- * the session transcript with the assistant toolCall-arguments field
- * excluded BY NAME (the sibling suites' measured residual: the assistant
- * message persists the call's own arguments; nothing this suite sends
- * carries the hash there, and the exclusion keeps the sweep honest about
- * that surface rather than crediting it) — a paraphrased, uppercased, or
- * re-encoded operand is §4.9's injectable-context residual, not this
- * sweep's catch. The scratch (child sessions included) is cleaned on
+ * operand-absence sweep is LEXICAL — case-folded ≥ 4-char hex runs held
+ * to containment against the held operand, the implementation's own
+ * rule — on the surfaces read here: the tool's result entries, the audit
+ * trail, and the session transcript with the assistant
+ * toolCall-arguments field excluded BY NAME (the sibling suites'
+ * measured residual: the assistant message persists the call's own
+ * arguments; nothing this suite sends carries the hash there, and the
+ * exclusion keeps the sweep honest about that surface rather than
+ * crediting it) — a paraphrased or re-encoded operand is §4.9's
+ * injectable-context residual, not this sweep's catch. The scratch (child sessions included) is cleaned on
  * success, so no arm reads it. One run, one direction per surface: the
  * compare-invalid and refusal directions are the module suite's arms.
  *
@@ -231,19 +232,22 @@ function dispatchAuditLines(): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// The operand sweep (lexical; lowercase hex, git's own spelling).
+// The operand sweep (lexical; the implementation's own rule, mirrored).
 // ---------------------------------------------------------------------------
 
 /**
- * Every lowercase-hex run of ≥ 7 chars in `text` that touches the held
- * operand: a run the held hash starts with (a prefix crossed the surface)
- * or a run carrying the held 7-prefix inside it (the operand embedded in
- * a longer run). Anything else — session UUIDs, unrelated hashes — is
- * left alone: the sweep pins the operand, not hex at large.
+ * Every hex run of ≥ 4 chars in `text`, either case, that touches the
+ * held operand — `namesHeldOperand`'s rule, mirrored: each run is
+ * lowercased and flagged iff the held hash contains it (a slice crossed
+ * the surface, prefix or interior) or it contains the held 7-prefix (the
+ * operand embedded in a longer run). Anything else — session UUIDs,
+ * unrelated hashes — is left alone: the sweep pins the operand, not hex
+ * at large.
  */
 function heldOperandRuns(text: string, held: string): string[] {
-	const runs = text.match(/[0-9a-f]{7,}/g) ?? [];
-	return runs.filter((run) => held.startsWith(run) || run.includes(held.slice(0, 7)));
+	const runs = text.match(/[0-9a-fA-F]{4,}/g) ?? [];
+	const prefix = held.slice(0, 7);
+	return runs.map((run) => run.toLowerCase()).filter((run) => held.includes(run) || run.includes(prefix));
 }
 
 /**
@@ -365,15 +369,25 @@ describe("the operand sweep's own teeth (§3.12)", () => {
 		assert.deepEqual(heldOperandRuns("alongside deadbee7 inert", HELD), []);
 	});
 
-	it("stays silent on a 6-char prefix — below the scan's floor", () => {
-		assert.deepEqual(heldOperandRuns("shorty 012345 rides", HELD), []);
+	it("flags a 6-char prefix — the sweep's floor is 4, mirroring the implementation's rule", () => {
+		assert.deepEqual(heldOperandRuns("shorty 012345 rides", HELD), ["012345"]);
 	});
 
-	it("stays silent on an uppercase spelling — the disclosed lexical residual", () => {
-		// A letters-prefixed held hash: digits are hex in either case, so an
-		// uppercased spelling of THIS operand leaves no ≥7 lowercase-class run.
+	it("flags a 4-char slice — the floor itself", () => {
+		assert.deepEqual(heldOperandRuns("tiny 89ab rides", HELD), ["89ab"]);
+	});
+
+	it("flags an interior slice of the held hash", () => {
+		// A non-repetitive held hash: the periodic HELD's interior slices
+		// contain its 7-prefix, which would let the prefix branch mask a
+		// missing containment branch.
+		const held = "9e107d9d372bb6826bd81d3542a419d6a5e10d9c";
+		assert.deepEqual(heldOperandRuns(`interior ${held.slice(14, 26)} rides`, held), [held.slice(14, 26)]);
+	});
+
+	it("flags an uppercase spelling — the sweep case-folds before containment", () => {
 		const lettersHeld = "fedcbafedcbafedcbafedcbafedcbafedcbafedc";
-		assert.deepEqual(heldOperandRuns("shouty FEDCBAFEDCBA", lettersHeld), []);
+		assert.deepEqual(heldOperandRuns("shouty FEDCBAFEDCBA", lettersHeld), ["fedcbafedcba"]);
 		assert.deepEqual(heldOperandRuns("control fedcbaf lands", lettersHeld), ["fedcbaf"]);
 	});
 

@@ -2,7 +2,11 @@
  * Dispatch admission — the bounded structured return, admitted on output
  * validity alone (SPEC §3.10; §4.9's sole-crossing clause).
  *
- * The one crossing is `<scratch>/return.json`. Admission demands: at most
+ * The one crossing is `<scratch>/return.json`. Admission demands: a
+ * REGULAR FILE at the slot — the type verdict rides `lstat`, which does
+ * not follow symlinks, so a FIFO (whose blocking open would freeze this
+ * synchronous admit inside the extension host), a device, a directory,
+ * or a symlinked slot refuses without ever being opened; at most
  * 64 KiB — an oversize return is refused WHOLE, never truncated into an
  * admission; strict JSON; the CLOSED schema
  * `{ ok: boolean, summary: string, reviewedHead?: string }` with unknown
@@ -17,7 +21,7 @@
  * caller from the run shape; junk, partial, and wrong-stream land on the
  * two return-side causes here.
  */
-import { readFileSync, statSync } from "node:fs";
+import { lstatSync, readFileSync, type Stats } from "node:fs";
 
 /** The return bound — beyond it the return is refused whole (§4.9). */
 export const RETURN_LIMIT_BYTES = 64 * 1024;
@@ -43,16 +47,22 @@ export type ReturnAdmission =
 const SCHEMA_KEYS = new Set(["ok", "summary", "reviewedHead"]);
 
 export function admitReturn(returnPath: string): ReturnAdmission {
-	// The bound is enforced on the stat BEFORE any read: an unstattable
-	// return is missing, an oversize one is malformed — decided without
-	// pulling the oversize bytes into memory.
-	let size: number;
+	// Type and bound are decided on the lstat BEFORE any read: an
+	// unstattable return is missing; a non-regular slot (FIFO, device,
+	// directory, symlink — lstat judges the link itself, never its target)
+	// is malformed, refused without an open that could block or read
+	// unbounded; an oversize one is malformed — decided without pulling
+	// the oversize bytes into memory.
+	let stat: Stats;
 	try {
-		size = statSync(returnPath).size;
+		stat = lstatSync(returnPath);
 	} catch {
 		return { admitted: false, cause: REFUSAL_CAUSES.missingReturn };
 	}
-	if (size > RETURN_LIMIT_BYTES) {
+	if (!stat.isFile()) {
+		return { admitted: false, cause: REFUSAL_CAUSES.malformedReturn };
+	}
+	if (stat.size > RETURN_LIMIT_BYTES) {
 		return { admitted: false, cause: REFUSAL_CAUSES.malformedReturn };
 	}
 	let raw: Buffer;

@@ -18,7 +18,14 @@
  * A worktree (`git worktree add`) is REJECTED as the isolation form: a
  * worktree shares the caller's object and ref store, so a delegate
  * commit would land in the caller's `.git` — the clone is what makes the
- * delegate's every write invisible to the caller (§1.5). An expected ref
+ * delegate's every write invisible to the caller (§1.5), once the two
+ * routes the clone itself plants back are severed at provision: the
+ * origin remote is removed, and `.git/logs` is deleted whole because the
+ * reflog records `clone: from <caller-path>`, a mineable address for a
+ * by-path push. What remains is the trust-domain residual — a same-uid
+ * delegate can still discover the caller path from inherited environment
+ * or a filesystem scan; the trace provision itself plants is removed.
+ * An expected ref
  * naming no object in the caller repository fails LOUD with a fixed
  * content-free cause, never a silently-provisioned tree (§3.9): an
  * unresolvable expected head is ambiguity, and the thrown cause names no
@@ -91,6 +98,10 @@ export function provisionDispatchContext(
 		// The clone's origin remote is a route back to the caller repository —
 		// push and fetch both — and is severed here (§1.5).
 		execFileSync("git", ["-C", treeDir, "remote", "remove", "origin"], { encoding: "utf8" });
+		// The clone's reflog is the second planted route back: `.git/logs`
+		// records `clone: from <caller-path>`, and a by-path push needs no
+		// remote. Removed whole (§1.5).
+		rmSync(join(treeDir, ".git", "logs"), { recursive: true, force: true });
 		writeFileSync(join(scratchRoot, "brief.md"), options.brief);
 		mkdirSync(join(scratchRoot, "state"));
 	} catch {

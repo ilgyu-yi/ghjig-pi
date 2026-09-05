@@ -36,7 +36,8 @@
  *     - `runDelegate(context, argv, { timeoutMs? })` → `Promise<{ exitCode,
  *       timedOut }>`: a delegate-agnostic argv child, cwd pinned to the
  *       provisioned tree, both streams drained, parent environment passed
- *       through with the one state seam rebound —
+ *       through with the repo-locating `GIT_*` family removed and the one
+ *       state seam rebound —
  *       `GITJIG_TEST_STATE_ROOT=<scratch>/state` (§5.5's disposable-root
  *       carve-out, pointed inside the scratch).
  *     - the delegate reaches the return file at `../return.json` from its
@@ -97,9 +98,9 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { basename, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { after, describe, it } from "node:test";
 import { repoRoot } from "./harness/run-pi.ts";
@@ -142,6 +143,13 @@ interface ExecutorModule {
 		argv: string[],
 		options?: { timeoutMs?: number },
 	): Promise<{ exitCode: number | null; timedOut: boolean }>;
+}
+
+interface AdmitModule {
+	admitReturn(returnPath: string):
+		| { admitted: true; ok: boolean; summary: string; reviewedHead?: string }
+		| { admitted: false; cause: string };
+	REFUSAL_CAUSES: { missingReturn: string; malformedReturn: string };
 }
 
 type DispatchOutcome =
@@ -282,6 +290,8 @@ const SCRIPT_PUSH =
 	"git -c user.name=zq -c user.email=zq@zq.zq -c commit.gpgsign=false commit -q -m 'zq delegate push commit' && " +
 	"git rev-parse HEAD > zq-pushed-head; git push -q origin HEAD:refs/heads/zq-pushed-branch; true";
 const SCRIPT_OBSERVE_HEAD = "git rev-parse HEAD > zq-observed-head";
+const SCRIPT_GITDIR_PROBE =
+	"git update-ref refs/heads/zq-gitdir-pwn HEAD; " + 'printf \'%s\' "${GIT_DIR-zq-unset}" > zq-gitdir-capture';
 const SCRIPT_SEAM_CAPTURE = 'printf \'%s\' "$GITJIG_TEST_STATE_ROOT" > zq-seam-capture';
 const SCRIPT_STREAM_FLOOD = "yes zqstreamfill | head -c 3000000 && yes zqstreamfill | head -c 3000000 >&2";
 
@@ -565,6 +575,34 @@ describe("a mutating delegate is invisible to the caller repository (issue #88, 
 		);
 		assert.equal(headOf(repo), held, "push-invisibility: the caller's HEAD moved under a delegate push (§1.5)");
 	});
+
+	it("the clone's metadata names no route back: .git/logs is absent and the caller path is unrecoverable", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "reflog-removed");
+		const repo = mintRepo();
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		assert.ok(
+			!existsSync(join(context.treeDir, ".git", "logs")),
+			"reflog-removed: the clone's .git/logs survives provision — the reflog records `clone: from " +
+				"<caller-path>`, and a delegate mining that path can push a ref straight into the caller " +
+				"repository by path, origin sever notwithstanding (§1.5)",
+		);
+		// The caller repo's mkdtemp basename is unique to this fixture, so a
+		// clean grep over the whole clone metadata is the caller path's absence.
+		let matched = "";
+		try {
+			matched = execFileSync("grep", ["-rl", "--", basename(repo), join(context.treeDir, ".git")], {
+				encoding: "utf8",
+			});
+		} catch {
+			// grep exits 1 on no match: no clone-metadata file names the caller path.
+		}
+		assert.equal(
+			matched,
+			"",
+			`reflog-removed: clone metadata still names the caller path — a mineable route back (§1.5): ${matched}`,
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -607,6 +645,42 @@ describe("the executor's child is drained and seam-scoped (issue #88, SPEC §4.9
 			captured.startsWith(context.scratchRoot + sep),
 			"state-seam: the seam target sits outside the scratch — the delegate's state must die with the " +
 				"dispatch (§5.5's disposable-root carve-out)",
+		);
+	});
+
+	it("an inherited GIT_DIR cannot retarget the delegate's writes at the caller repository", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "gitdir-egress");
+		const executor = await requireModule<ExecutorModule>("executor.ts", "gitdir-egress");
+		const repo = mintRepo();
+		const refsBefore = git(repo, "for-each-ref");
+		const context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		cleanups.push(context.scratchRoot);
+		const hadGitDir = Object.prototype.hasOwnProperty.call(process.env, "GIT_DIR");
+		const priorGitDir = process.env.GIT_DIR;
+		process.env.GIT_DIR = join(repo, ".git");
+		let outcome: { exitCode: number | null; timedOut: boolean };
+		try {
+			outcome = await executor.runDelegate(context, ["sh", "-c", SCRIPT_GITDIR_PROBE], { timeoutMs: 30_000 });
+		} finally {
+			if (hadGitDir) {
+				process.env.GIT_DIR = priorGitDir;
+			} else {
+				delete process.env.GIT_DIR;
+			}
+		}
+		assert.equal(outcome.exitCode, 0, "gitdir-egress: the probing delegate failed to run — the arm is vacuous");
+		assert.equal(
+			readFileSync(join(context.treeDir, "zq-gitdir-capture"), "utf8"),
+			"zq-unset",
+			"gitdir-egress: GIT_DIR reached the delegate's environment — git resolves the repo-locating GIT_* " +
+				"family ahead of cwd, so an inherited one retargets every delegate git write at the caller " +
+				"repository despite the pinned cwd (§1.5)",
+		);
+		assert.equal(
+			git(repo, "for-each-ref"),
+			refsBefore,
+			"gitdir-egress: a delegate write landed a ref in the caller repository under an inherited GIT_DIR — " +
+				"the cwd pin is not the repo pin (§1.5)",
 		);
 	});
 });
@@ -729,6 +803,35 @@ describe("admission: return.json is the sole, bounded, closed-schema crossing (i
 				[headOf(repo).slice(0, 7), "the held hash's prefix"],
 			],
 			"unknown-key",
+		);
+	});
+
+	it("fifo-slot: a FIFO planted at the return slot refuses malformedReturn without wedging the admit", { timeout: 30_000 }, async () => {
+		const admit = await requireModule<AdmitModule>("admit.ts", "fifo-slot");
+		const slot = join(mintDir("gitjig-dispatch-slot-"), "return.json");
+		execFileSync("mkfifo", [slot]);
+		const verdict = admit.admitReturn(slot);
+		assert.ok(!verdict.admitted, "fifo-slot: a FIFO at the return slot was admitted — the slot is not a return");
+		assert.equal(
+			(verdict as { cause: string }).cause,
+			admit.REFUSAL_CAUSES.malformedReturn,
+			"fifo-slot: the FIFO did not refuse on the malformed cause — the regular-file verdict precedes any " +
+				"read, because a blocking open on a FIFO freezes the synchronous admit inside the extension " +
+				"host, where no timer can fire (§3.10's fail-closed set)",
+		);
+	});
+
+	it("symlink-slot: a symlinked return slot refuses malformedReturn — the link is judged, never followed", async () => {
+		const admit = await requireModule<AdmitModule>("admit.ts", "symlink-slot");
+		const slot = join(mintDir("gitjig-dispatch-slot-"), "return.json");
+		symlinkSync("/dev/zero", slot);
+		const verdict = admit.admitReturn(slot);
+		assert.ok(!verdict.admitted, "symlink-slot: a symlinked return slot was admitted");
+		assert.equal(
+			(verdict as { cause: string }).cause,
+			admit.REFUSAL_CAUSES.malformedReturn,
+			"symlink-slot: the symlink did not refuse on the malformed cause — a followed link puts the size " +
+				"gate on the target (a device reads unbounded), so the slot's own lstat type decides (§3.10)",
 		);
 	});
 

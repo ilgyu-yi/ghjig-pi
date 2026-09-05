@@ -3,8 +3,13 @@
  * §3.10's outcome classes decided by the caller from this run shape).
  *
  * The delegate is an argv child (never a shell string) with cwd pinned to
- * the provisioned tree; the parent environment passes through with the
- * ONE state seam rebound — `GITJIG_TEST_STATE_ROOT=<scratch>/state`
+ * the provisioned tree; the parent environment passes through with two
+ * edits — the repo-locating `GIT_DIR` / `GIT_WORK_TREE` /
+ * `GIT_INDEX_FILE` / `GIT_OBJECT_DIRECTORY` / `GIT_COMMON_DIR` family is
+ * DELETED, because git resolves those ahead of cwd and an inherited one
+ * retargets every delegate git write at the caller repository despite
+ * the pinned cwd (§1.5), and the ONE state seam is rebound —
+ * `GITJIG_TEST_STATE_ROOT=<scratch>/state`
  * (§5.5's disposable-root carve-out, pointed inside the scratch so the
  * delegate's state dies with the dispatch). Both streams are drained
  * UNRECORDED: no delegate stream byte is held anywhere it could later
@@ -23,7 +28,10 @@
  * detached and the bound kills its whole process group. Named residual
  * (§3.11): a double-forked, re-setsid'd grandchild survives any group
  * kill on this platform and inherits the passthrough environment —
- * named, not claimed closed.
+ * named, not claimed closed. The group kill fires on the timeout path
+ * alone: a delegate-spawned child surviving a normal exit or a
+ * post-spawn error is not group-killed, inherits the passthrough
+ * environment, and outlives the scratch's removal.
  */
 import { spawn } from "node:child_process";
 import type { DispatchContext } from "./provision.ts";
@@ -60,14 +68,23 @@ export function runDelegate(
 			settled = true;
 			resolve(outcome);
 		};
+		// Passthrough with the repo-locating GIT_* family deleted — git
+		// resolves these ahead of cwd, so an inherited one would retarget the
+		// delegate's writes at the caller repository (§1.5) — and the one
+		// state seam rebound (§5.5); nothing else is edited.
+		const env = { ...process.env };
+		delete env.GIT_DIR;
+		delete env.GIT_WORK_TREE;
+		delete env.GIT_INDEX_FILE;
+		delete env.GIT_OBJECT_DIRECTORY;
+		delete env.GIT_COMMON_DIR;
+		env.GITJIG_TEST_STATE_ROOT = context.stateDir;
 		const child = spawn(argv[0], argv.slice(1), {
 			cwd: context.treeDir,
 			// Detached: the child leads its own process group, so the bound's
 			// kill reaches delegate-spawned children too, not the child alone.
 			detached: true,
-			// Passthrough with the one seam rebound (§5.5): nothing else about
-			// the parent environment is edited.
-			env: { ...process.env, GITJIG_TEST_STATE_ROOT: context.stateDir },
+			env,
 			stdio: ["ignore", "pipe", "pipe"],
 		});
 		let spawned = false;
