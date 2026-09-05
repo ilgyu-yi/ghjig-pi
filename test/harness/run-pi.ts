@@ -16,7 +16,12 @@
  *
  * The gitjig runtime under test is linked from THIS repository's tree
  * (`.pi/extensions/gitjig.ts` + `.pi/extensions/gitjig/`) into the fixture,
- * so the suite exercises the committed bytes, not a copy.
+ * so the suite exercises the committed bytes, not a copy. The same idiom
+ * carries the two other governed command surfaces (§4.8): `linkPromptsDir`
+ * and `linkSkillsDir` symlink this repository's `.pi/prompts` and
+ * `.pi/skills` into the fixture's `.pi/`. All three link options lay out
+ * shape only — a dangling link is legal by design; whether the target is
+ * present is measured by the suite's assertions, never by the builder.
  *
  * Invocation contract: run the suites as `node --test "test/*.test.ts"`.
  * A bare `node --test` must NOT be used — node's default discovery treats
@@ -50,6 +55,10 @@ export interface FixtureOptions {
 	script: ScriptTurn[];
 	/** Symlink this repository's `.pi/extensions/gitjig.ts` and `.pi/extensions/gitjig/` into the fixture. */
 	linkGitjigRuntime?: boolean;
+	/** Symlink this repository's `.pi/prompts/` into the fixture's `.pi/` (dangling is legal — header). */
+	linkPromptsDir?: boolean;
+	/** Symlink this repository's `.pi/skills/` into the fixture's `.pi/` (dangling is legal — header). */
+	linkSkillsDir?: boolean;
 	/** Extra extension files to write, keyed by path relative to `<fixture>/.pi/extensions/`. */
 	extensionFiles?: Record<string, string>;
 	/** Extra extension symlinks to create, keyed by name relative to `<fixture>/.pi/extensions/`, value = absolute target. */
@@ -146,6 +155,15 @@ export function buildFixture(options: FixtureOptions): Fixture {
 		// the harness lays out the shape, the assertions read the result.
 		symlinkSync(join(repoRoot(), ".pi", "extensions", "gitjig.ts"), join(extensionsDir, "gitjig.ts"), "file");
 		symlinkSync(join(repoRoot(), ".pi", "extensions", "gitjig"), join(extensionsDir, "gitjig"), "dir");
+	}
+
+	// The other two governed command surfaces, same idiom and same dangling-
+	// links-are-legal contract as the runtime links above.
+	if (options.linkPromptsDir) {
+		symlinkSync(join(repoRoot(), ".pi", "prompts"), join(root, ".pi", "prompts"), "dir");
+	}
+	if (options.linkSkillsDir) {
+		symlinkSync(join(repoRoot(), ".pi", "skills"), join(root, ".pi", "skills"), "dir");
 	}
 
 	for (const [relPath, content] of Object.entries(options.extensionFiles ?? {})) {
