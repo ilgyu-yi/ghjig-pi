@@ -54,18 +54,18 @@ This document is the repository's behavioural SSOT: every enforced norm, gate cl
 | &nbsp;&nbsp;§4.7 | Host boundary | 559 |
 | &nbsp;&nbsp;§4.8 | The command layer | 567 |
 | &nbsp;&nbsp;§4.9 | The delegation layer | 624 |
-| §5 | Cross-cutting contracts | 664 |
-| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 668 |
-| &nbsp;&nbsp;§5.2 | Graceful degradation | 672 |
-| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 676 |
-| &nbsp;&nbsp;§5.4 | Work language | 680 |
-| &nbsp;&nbsp;§5.5 | State boundary | 684 |
-| &nbsp;&nbsp;§5.6 | Operating modes | 690 |
-| &nbsp;&nbsp;§5.7 | Unattended conduct | 700 |
-| &nbsp;&nbsp;§5.8 | Context lifecycle | 710 |
-| &nbsp;&nbsp;§5.9 | Session surfaces | 718 |
-| §6 | Self-governance milestone | 726 |
-| &nbsp;&nbsp;§6.1 | Substrate posture | 737 |
+| §5 | Cross-cutting contracts | 666 |
+| &nbsp;&nbsp;§5.1 | Self-contained artifacts | 670 |
+| &nbsp;&nbsp;§5.2 | Graceful degradation | 674 |
+| &nbsp;&nbsp;§5.3 | Gate-activation conditions | 678 |
+| &nbsp;&nbsp;§5.4 | Work language | 682 |
+| &nbsp;&nbsp;§5.5 | State boundary | 686 |
+| &nbsp;&nbsp;§5.6 | Operating modes | 692 |
+| &nbsp;&nbsp;§5.7 | Unattended conduct | 702 |
+| &nbsp;&nbsp;§5.8 | Context lifecycle | 712 |
+| &nbsp;&nbsp;§5.9 | Session surfaces | 720 |
+| §6 | Self-governance milestone | 728 |
+| &nbsp;&nbsp;§6.1 | Substrate posture | 739 |
 <!-- TOC END -->
 
 ## 0. Intent and scope
