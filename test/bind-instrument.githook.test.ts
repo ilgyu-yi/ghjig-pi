@@ -985,6 +985,85 @@ describe("a sourced file's own `exit` folds the hook to allow (issue #68, SPEC �
 });
 
 // ---------------------------------------------------------------------------
+// The fold's arming record is reachable from the files it guards (issue #71).
+// A sourced file executes in the hook's OWN shell, so the bookkeeping the fold
+// consults is addressable by the very code whose failure it exists to catch.
+// Both arms below corrupt it with ONE appended line in a committed helper, and
+// each measures the fold's own contract rather than the corruption: the tier
+// never carries a helper's status to git (§3.2, §5.2), and a run in which every
+// source completed never records one that did not.
+// ---------------------------------------------------------------------------
+
+describe("the source fold's arming record is unreachable from a sourced file (issue #71, SPEC §3.2, §5.2)", { skip: IS_WINDOWS }, () => {
+	it("a helper that UNSETS the arming record leaves the NEXT source window unguarded", () => {
+		const fixture = buildArmedScanFixture();
+		try {
+			// `pre-commit` sources branch_guard.sh first and secret_scan.sh second.
+			// Clearing the record inside the first source makes the decrement land
+			// below zero, so the second window's arming test never matches and the
+			// window opens with no trap behind it.
+			appendFileSync(join(fixture.root, ".githooks", "helpers", "branch_guard.sh"), "\nunset _GH_SRC_DEPTH\n");
+			// The failure the fold exists to absorb, in the now-unguarded window.
+			appendFileSync(join(fixture.root, ".githooks", "helpers", "secret_scan.sh"), "\nexit 9\n");
+
+			const attempt = commitWithMessage(fixture, "chore: exercise the unset-arming-record arm\n");
+			assert.equal(
+				attempt.status,
+				0,
+				`unset arming record: the commit was refused on machinery the actor did not cause — the one ` +
+					`direction §5.2 states this tier never takes; status ${attempt.status}, stderr: ` +
+					`${JSON.stringify(attempt.stderr)}`,
+			);
+			assert.match(
+				attempt.stderr,
+				/not enforced: a helper did not finish sourcing/,
+				`unset arming record: the fold left no notice, so the operator cannot tell a disarmed allow from ` +
+					`an enforced one (§3.9); stderr: ${JSON.stringify(attempt.stderr)}`,
+			);
+			assert.match(
+				attempt.auditDelta,
+				/source-incomplete/,
+				`unset arming record: the fold left no record either, so nothing durable says the tier ran none ` +
+					`of its remaining checks (§3.9, §5.5); auditDelta: ${JSON.stringify(attempt.auditDelta)}`,
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+
+	it("a helper that RAISES the arming record leaves the trap armed past the sourcing function", () => {
+		const fixture = buildArmedScanFixture();
+		try {
+			// `commit-msg` sources conventional_commit.sh. Raising the record inside
+			// that source leaves the decrement above zero, so the window is never
+			// closed and the EXIT trap outlives the function that armed it — firing
+			// at the adapter's own exit, where its `exit 0` overwrites the refusal.
+			appendFileSync(
+				join(fixture.root, ".githooks", "helpers", "conventional_commit.sh"),
+				"\n_GH_SRC_DEPTH=$(( ${_GH_SRC_DEPTH:-0} + 1 ))\n",
+			);
+
+			const attempt = commitWithMessage(fixture, "no type here, just prose\n");
+			assert.notEqual(
+				attempt.status,
+				0,
+				`raised arming record: the commit was CREATED while the grammar refusal stood in the record ` +
+					`sink — the artifact says allowed and the trail says blocked; auditDelta: ` +
+					`${JSON.stringify(attempt.auditDelta)}`,
+			);
+			assert.doesNotMatch(
+				attempt.auditDelta,
+				/source-incomplete/,
+				`raised arming record: every source in this run completed, yet the trail names one that did not ` +
+					`finish — a record of a failure that never happened; auditDelta: ${JSON.stringify(attempt.auditDelta)}`,
+			);
+		} finally {
+			removeGithookFixture(fixture);
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Sink hardening the sibling suite's link arms do not reach (§4.6, §5.5).
 // ---------------------------------------------------------------------------
 
