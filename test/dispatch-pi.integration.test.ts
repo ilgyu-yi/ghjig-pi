@@ -46,8 +46,8 @@
  * an operand; the dispatch act lands at least one `"category":"dispatch"`
  * audit record through the landed writer; the executor passes the parent
  * environment through (the child `pi` needs the parent's PATH/HOME/
- * PI_OFFLINE isolation) with the repo-locating `GIT_*` family removed
- * and the state seam rebound into the scratch.
+ * PI_OFFLINE isolation) with the repo-locating and config-injection
+ * `GIT_*` families removed and the state seam rebound into the scratch.
  *
  * WHAT THIS SUITE DOES NOT ESTABLISH. The round trip proves the
  * DISPATCHER's provision → child-session → bounded-return path, never any

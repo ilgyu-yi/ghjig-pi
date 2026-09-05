@@ -34,9 +34,10 @@
  *
  *   `dispatch/executor.ts`
  *     - `runDelegate(context, argv, { timeoutMs? })` → `Promise<{ exitCode,
- *       timedOut }>`: a delegate-agnostic argv child, cwd pinned to the
- *       provisioned tree, both streams drained, parent environment passed
- *       through with the repo-locating `GIT_*` family removed and the one
+ *       timedOut, spawnFailed }>`: a delegate-agnostic argv child, cwd
+ *       pinned to the provisioned tree, both streams drained, parent
+ *       environment passed through with the repo-locating and
+ *       config-injection `GIT_*` families removed and the one
  *       state seam rebound —
  *       `GITJIG_TEST_STATE_ROOT=<scratch>/state` (§5.5's disposable-root
  *       carve-out, pointed inside the scratch).
@@ -555,6 +556,64 @@ describe("provision pins the tree at the once-resolved hash (issue #88, SPEC §4
 		);
 	});
 
+	it("an injected core.hooksPath cannot make provision's own git children run an attacker hook against the caller tree", async () => {
+		const provision = await requireModule<ProvisionModule>("provision.ts", "config-poisoned-provision");
+		const repo = mintRepo({ "zq-guarded.txt": "zq caller content\n" });
+		const held = headOf(repo);
+		const callerBefore = readFileSync(join(repo, "zq-guarded.txt"), "utf8");
+		// The injected hook writes a scratch sentinel AND overwrites the
+		// caller's tracked file — either effect is a caller-integrity breach
+		// by provision's own child under the config-injection env channel.
+		const hooksDir = mintDir("gitjig-dispatch-hooks-");
+		const sentinel = join(mintDir("gitjig-dispatch-sentinel-"), "zq-provision-hook-fired");
+		writeFileSync(
+			join(hooksDir, "post-checkout"),
+			`#!/bin/sh\ntouch '${sentinel}'\nprintf 'zq hook overwrote the caller\\n' > '${join(repo, "zq-guarded.txt")}'\n`,
+		);
+		execFileSync("chmod", ["+x", join(hooksDir, "post-checkout")], { encoding: "utf8" });
+		// The poison rides the parent env as git's documented config-injection
+		// channel (GIT_CONFIG_COUNT + indexed KEY/VALUE pair) — git honors
+		// core.hooksPath from this channel, so provision's own clone+checkout
+		// would run the hook. Set/restore around the in-process call.
+		const configKeys = ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"] as const;
+		const prior = new Map<string, string | undefined>(configKeys.map((key) => [key, process.env[key]]));
+		process.env.GIT_CONFIG_COUNT = "1";
+		process.env.GIT_CONFIG_KEY_0 = "core.hooksPath";
+		process.env.GIT_CONFIG_VALUE_0 = hooksDir;
+		let context: DispatchContext;
+		try {
+			context = await provision.provisionDispatchContext(repo, { brief: BRIEF });
+		} finally {
+			for (const key of configKeys) {
+				const value = prior.get(key);
+				if (value === undefined) {
+					delete process.env[key];
+				} else {
+					process.env[key] = value;
+				}
+			}
+		}
+		cleanups.push(context.scratchRoot);
+		assert.ok(
+			!existsSync(sentinel),
+			"config-poisoned-provision: provision's own git children ran an attacker hook — an inherited " +
+				"GIT_CONFIG_COUNT carried core.hooksPath into the clone+checkout, so a config-injection env " +
+				"channel executed code inside provision (§1.5)",
+		);
+		assert.equal(
+			readFileSync(join(repo, "zq-guarded.txt"), "utf8"),
+			callerBefore,
+			"config-poisoned-provision: the caller's working file was rewritten by a provision-run hook — a " +
+				"silent caller-tree write on a green provision (§1.5)",
+		);
+		assert.equal(context.heldHash, held, "config-poisoned-provision: the held hash is not the caller's HEAD");
+		assert.equal(
+			git(context.treeDir, "rev-parse", "HEAD").trim(),
+			held,
+			"config-poisoned-provision: the clone is not detached at the held hash (§4.9 pin-at-provision)",
+		);
+	});
+
 	it("cleanup removes the scratch", async () => {
 		const provision = await requireModule<ProvisionModule>("provision.ts", "cleanup");
 		const repo = mintRepo();
@@ -600,7 +659,7 @@ describe("a mutating delegate is invisible to the caller repository (issue #88, 
 			git(repo, "for-each-ref"),
 			refsBefore,
 			"mutation-invisibility: the caller's refs changed — a delegate branch or commit crossed the isolation " +
-				"boundary (§1.5; the clone is the delegate's whole writable world)",
+				"boundary (§1.5; the clone is the delegate's local writable world)",
 		);
 		assert.equal(
 			git(repo, "status", "--porcelain"),
@@ -1182,6 +1241,74 @@ describe("the blind compare and the operand scan (issue #88, SPEC §4.9, §1.6)"
 			(outcome as { summary?: string }).summary,
 			"zq run alongside deadbee7 stays inert",
 			"unrelated-hex: the admitted summary did not cross back intact",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Tool surface: no parameter is coerced — present-but-wrong-typed refuses.
+// ---------------------------------------------------------------------------
+
+describe("the tool surface refuses a present-but-non-string expectedRef (issue #88, SPEC §4.9)", () => {
+	/** The registered tool's execute shape, captured through a fake pi. */
+	interface RegisteredTool {
+		execute(
+			toolCallId: string,
+			params: Record<string, unknown>,
+		): Promise<{ content: Array<{ type: string; text: string }>; details: Record<string, unknown> }>;
+	}
+
+	it("expectedRef: 123 refuses on a fixed cause with an audit record — never a coerced non-compare dispatch", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "expectedref-type");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		let registered: RegisteredTool | undefined;
+		index.registerDispatchTool({ registerTool: (spec: unknown) => (registered = spec as RegisteredTool) }, repo, sink.stateRoot);
+		assert.ok(registered !== undefined, "expectedref-type: registerDispatchTool registered no tool — the arm is vacuous");
+		const result = await registered.execute("zq-toolcall", {
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-valid.json")],
+			expectedRef: 123,
+		});
+		assert.equal(
+			result.details.disposition,
+			"refused",
+			"expectedref-type: a present-but-non-string expectedRef was not refused — it coerces into a silently " +
+				"different dispatch (the pin flips to HEAD, the compare goes absent) while the sibling brief guard " +
+				`refuses loud, and the tool surface's rule is no coercion (§4.9): ${JSON.stringify(result)}`,
+		);
+		assert.ok(
+			!JSON.stringify(result).includes("123"),
+			"expectedref-type: the refusal names the rejected value — the cause is a fixed content-free literal (§3.9)",
+		);
+		assert.ok(
+			dispatchAuditLines(sink).some((line) => line.includes('"action":"refuse-expected-ref"')),
+			'expectedref-type: no "category":"dispatch" refuse-expected-ref audit record landed — every refusal ' +
+				`lands its record through the landed writer (§5.5); audit: ${JSON.stringify(auditLines(sink))}`,
+		);
+	});
+
+	it("an absent expectedRef stays legal: a non-compare dispatch admits with no compare clause", async () => {
+		const index = await requireModule<IndexModule>("index.ts", "expectedref-absent");
+		const repo = mintRepo(PAYLOADS);
+		const sink = mintStateRoot();
+		let registered: RegisteredTool | undefined;
+		index.registerDispatchTool({ registerTool: (spec: unknown) => (registered = spec as RegisteredTool) }, repo, sink.stateRoot);
+		assert.ok(registered !== undefined, "expectedref-absent: registerDispatchTool registered no tool — the arm is vacuous");
+		const result = await registered.execute("zq-toolcall", {
+			brief: BRIEF,
+			delegateArgv: ["sh", "-c", COPY("payload-valid.json")],
+		});
+		assert.equal(
+			result.details.disposition,
+			"admitted",
+			"expectedref-absent: a dispatch with no expectedRef was refused — only present-but-wrong-typed " +
+				`refuses; absence is the legal non-compare dispatch (§4.9): ${JSON.stringify(result)}`,
+		);
+		assert.ok(
+			!("compare" in result.details),
+			"expectedref-absent: a compare verdict surfaced with no expectedRef — the compare rides only a " +
+				"caller-named expected head (§1.6 via §4.9)",
 		);
 	});
 });

@@ -57,6 +57,9 @@ const REFUSE_ARGV = "dispatch refused: the delegate argv is not an admissible no
 /** Inadmissible brief from the tool surface — refused before any provision. */
 const REFUSE_BRIEF = "dispatch refused: the dispatch brief is not an admissible string";
 
+/** Present-but-non-string expectedRef — refused, never coerced to undefined. */
+const REFUSE_EXPECTED_REF = "dispatch refused: the expected ref is present but not an admissible string";
+
 export type DispatchOutcome =
 	| { disposition: "admitted"; ok: boolean; summary: string; compare?: "confirmed" | "invalid" }
 	| { disposition: "refused"; cause: string };
@@ -214,12 +217,24 @@ export function registerDispatchTool(pi: ExtensionAPI, repoRoot: string, stateRo
 				appendAuditRecord(stateRoot, { category: "dispatch", action: "refuse-brief", text: REFUSE_BRIEF });
 				return result(REFUSE_BRIEF, { disposition: "refused" });
 			}
+			const expectedRef: unknown = params.expectedRef;
+			if (expectedRef !== undefined && typeof expectedRef !== "string") {
+				// No coercion: a present-but-non-string expectedRef would flip the
+				// pin to HEAD and drop the compare — a silently different dispatch,
+				// not the compare the caller asked for. Absent stays legal.
+				appendAuditRecord(stateRoot, {
+					category: "dispatch",
+					action: "refuse-expected-ref",
+					text: REFUSE_EXPECTED_REF,
+				});
+				return result(REFUSE_EXPECTED_REF, { disposition: "refused" });
+			}
 			const outcome = await runDispatch({
 				callerRepoRoot: repoRoot,
 				stateRoot,
 				brief,
 				delegateArgv: delegateArgv as string[],
-				expectedRef: typeof params.expectedRef === "string" ? params.expectedRef : undefined,
+				expectedRef,
 			});
 			if (outcome.disposition === "refused") {
 				return result(outcome.cause, { disposition: "refused" });

@@ -4,11 +4,14 @@
  *
  * The delegate is an argv child (never a shell string) with cwd pinned to
  * the provisioned tree; the parent environment passes through with two
- * edits — the repo-locating `GIT_DIR` / `GIT_WORK_TREE` /
- * `GIT_INDEX_FILE` / `GIT_OBJECT_DIRECTORY` / `GIT_COMMON_DIR` family is
+ * edits — the repo-locating and config-injection `GIT_*` families
+ * (`GIT_DIR` / `GIT_WORK_TREE` / `GIT_INDEX_FILE` /
+ * `GIT_OBJECT_DIRECTORY` / `GIT_COMMON_DIR`, and
+ * `GIT_CONFIG_PARAMETERS` / `GIT_CONFIG_COUNT`) are
  * DELETED, because git resolves those ahead of cwd and an inherited one
  * retargets every delegate git write at the caller repository despite
- * the pinned cwd (§1.5), and the ONE state seam is rebound —
+ * the pinned cwd, or injects config into it (§1.5), and the ONE state
+ * seam is rebound —
  * `GITJIG_TEST_STATE_ROOT=<scratch>/state`
  * (§5.5's disposable-root carve-out, pointed inside the scratch so the
  * delegate's state dies with the dispatch). Both streams are drained
@@ -68,9 +71,10 @@ export function runDelegate(
 			settled = true;
 			resolve(outcome);
 		};
-		// Passthrough with the repo-locating GIT_* family deleted — the one
-		// shared scrub provision's own git children ride too (§1.5) — and
-		// the one state seam rebound (§5.5); nothing else is edited.
+		// Passthrough with the repo-locating and config-injection GIT_*
+		// families deleted — the one shared scrub provision's own git
+		// children ride too (§1.5) — and the one state seam rebound (§5.5);
+		// nothing else is edited.
 		const env = withoutRepoLocatingGitEnv(process.env);
 		env.GITJIG_TEST_STATE_ROOT = context.stateDir;
 		let child: ReturnType<typeof spawn>;

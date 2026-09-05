@@ -43,13 +43,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 /**
- * A copy of `base` with the repo-locating family — `GIT_DIR`,
- * `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
- * `GIT_COMMON_DIR` — deleted: git resolves these ahead of both cwd and
- * `-C`, so an inherited one retargets a git child's reads and writes at
- * whatever repository the variable names (§1.5). One hazard, one
- * spelling: provision's own git children and the executor's delegate
- * both build their env from this helper, never from a copied list.
+ * A copy of `base` with two GIT_* families deleted, the members git
+ * resolves ahead of both cwd and `-C` (§1.5): the repo-locating family —
+ * `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
+ * `GIT_COMMON_DIR` — retargets a git child's reads and writes at whatever
+ * repository the variable names; the config-injection channel —
+ * `GIT_CONFIG_PARAMETERS` plus `GIT_CONFIG_COUNT` (deleting COUNT
+ * neutralizes the indexed `GIT_CONFIG_KEY_<n>`/`GIT_CONFIG_VALUE_<n>`
+ * family, which git reads only up to COUNT) — injects arbitrary config
+ * into that child, e.g. a `core.hooksPath` or `core.fsmonitor` git honors
+ * from this channel and runs as a program inside provision's own clone
+ * and checkout. `GIT_CONFIG_GLOBAL`/`GIT_CONFIG_SYSTEM` are the
+ * file-indirection members left PASSING: they redirect where git reads
+ * user/system config, and deleting them un-isolates config reads — a
+ * harness that sets `GIT_CONFIG_GLOBAL=/dev/null` to keep user config out
+ * of provision's children would, on deletion, leak `~/.gitconfig` back in.
+ * One hazard, one spelling: provision's own git children and the
+ * executor's delegate both build their env from this helper, never from a
+ * copied list.
  */
 export function withoutRepoLocatingGitEnv(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const env = { ...base };
@@ -58,6 +69,8 @@ export function withoutRepoLocatingGitEnv(base: NodeJS.ProcessEnv): NodeJS.Proce
 	delete env.GIT_INDEX_FILE;
 	delete env.GIT_OBJECT_DIRECTORY;
 	delete env.GIT_COMMON_DIR;
+	delete env.GIT_CONFIG_PARAMETERS;
+	delete env.GIT_CONFIG_COUNT;
 	return env;
 }
 
@@ -86,10 +99,12 @@ export function provisionDispatchContext(
 	callerRepoRoot: string,
 	options: { brief: string; expectedRef?: string },
 ): DispatchContext {
-	// Every git child below runs with the repo-locating GIT_* family
-	// scrubbed: an inherited GIT_DIR would retarget these very children —
-	// the resolve, the detach, the origin sever — at another repository
-	// despite their -C target (§1.5).
+	// Every git child below runs with the repo-locating and
+	// config-injection GIT_* families scrubbed: an inherited GIT_DIR would
+	// retarget these very children — the resolve, the detach, the origin
+	// sever — at another repository despite their -C target, and an
+	// inherited GIT_CONFIG_COUNT could inject a core.hooksPath that runs a
+	// program inside them (§1.5).
 	const env = withoutRepoLocatingGitEnv(process.env);
 	// Resolved once, here, in the caller's repository; the hash is held and
 	// every later act binds to it (§4.9 pin-at-provision).
