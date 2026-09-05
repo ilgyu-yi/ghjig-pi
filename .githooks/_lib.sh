@@ -223,32 +223,65 @@ safe_source() {
 # disarmed allow that reads like an enforced one — one stderr line plus one
 # audit record naming the file.
 #
-# The window is COUNTED, because a helper may itself call githook_source: an
-# inner call that cleared the trap on its way out would leave the outer
-# source unguarded, and an `exit` there would carry its status to git — a
-# wedged hook with nothing printed.
+# The window has to know whether it is the OUTERMOST one, because a helper may
+# itself call githook_source: an inner call that cleared the trap on its way
+# out would leave the outer source unguarded, and an `exit` there would carry
+# its status to git — a wedged hook with nothing printed.
 #
-# What the fold COVERS is a helper's own error path that ends in
-# `exit` or in a non-zero return, with this tier's EXIT slot and the depth
-# counter below untouched and the shell still alive. Those are the terms it
-# runs on, not exceptions to a wider claim: a sourced file executes in THIS
-# shell, so it can reach any of them. Outside those terms the outcome is not
-# this tier's to decide, and the fold's line and record may not run.
-_GH_SRC_DEPTH=0
+# That question is answered from the shell's OWN CALL STACK and never from
+# bookkeeping this tier keeps. A sourced file executes in THIS shell, so any
+# variable this function holds is addressable by the very code whose failure
+# the fold exists to absorb — and a record it can shift moves the fold in both
+# directions: driven below its floor, the next window's arming test stops
+# matching and that window opens with no trap behind it; driven above, the
+# window is never closed and the trap outlives the function that armed it,
+# firing at the adapter's own exit where its `exit 0` overwrites a refusal
+# that already reached the record sink. A counter cannot be clamped out of
+# this: clamping closes one direction and leaves the other byte-identical.
+# `FUNCNAME` carries one frame per live call, and a sourced file cannot
+# rewrite its caller's frames, so counting this function's own frames decides
+# the window with nothing for a helper to assign to.
+#
+# What the fold COVERS is a helper's own error path that ends in `exit` or in
+# a non-zero return, with this tier's EXIT slot untouched and the shell still
+# alive. Those are the terms it runs on, not exceptions to a wider claim:
+# a sourced file executes in THIS shell, so it can reach any of them. Outside
+# those terms the outcome is not this tier's to decide, and the fold's line
+# and record may not run.
+#
+# Enumerated residuals, in place (SPEC §3.11). `FUNCNAME` is itself unsettable
+# in bash, and a sourced file that unsets it leaves an empty array: the count
+# then reads zero, every frame answers OUTERMOST, and a nested window loses
+# the outer's guard. That is the direction chosen deliberately — the opposite
+# answer would leave the trap armed at the adapter's exit, which is a forged
+# allow, while this one is at worst a visible refusal on machinery. And a
+# sourced file can redefine any function in this shell, this one included;
+# that exposure is the tier's own and is not narrowed here, since it stands
+# equally over `safe_source` and `audit_log`.
+
+# _gh_src_outermost — true iff no githook_source frame encloses this one.
+_gh_src_outermost() {
+  local _gh_n=0 _gh_f
+  for _gh_f in ${FUNCNAME[@]+"${FUNCNAME[@]}"}; do
+    [ "$_gh_f" = "githook_source" ] && _gh_n=$(( _gh_n + 1 ))
+  done
+  [ "$_gh_n" -le 1 ]
+}
+
 githook_source() {
   local _gh_src_rc
   # Read by the trap body when it FIRES rather than when it is armed, so they
   # are set at every entry and `local` puts the outer call's values back when
   # a nested one returns.
   local _gh_src_file="$1" _gh_src_cat="${2:-git-hook-tier}"
-  if [ "${_GH_SRC_DEPTH:-0}" -eq 0 ]; then
+  if _gh_src_outermost; then
     trap 'printf "[dev-shell] local hook tier not enforced: a helper did not finish sourcing, so this hook stopped there and ran none of its remaining checks\n" >&2; ( audit_log warn "${_gh_src_cat:-git-hook-tier}" source-incomplete "${_gh_src_file:-unknown}" ) >/dev/null 2>&1 || true; exit 0' EXIT
   fi
-  _GH_SRC_DEPTH=$(( ${_GH_SRC_DEPTH:-0} + 1 ))
   safe_source "$GITJIG_SHELL_HELPERS/$_gh_src_file" "$_gh_src_cat"
   _gh_src_rc=$?
-  _GH_SRC_DEPTH=$(( ${_GH_SRC_DEPTH:-0} - 1 ))
-  [ "${_GH_SRC_DEPTH:-0}" -gt 0 ] || trap - EXIT
+  # Recomputed, never remembered: a value carried across the source is a value
+  # the sourced file had a turn to change.
+  if _gh_src_outermost; then trap - EXIT; fi
   if [ "$_gh_src_rc" -ne 0 ]; then
     printf '[dev-shell] local hook tier not enforced: a helper could not be loaded, so this hook stopped there and ran none of its remaining checks\n' >&2
   fi
