@@ -44,7 +44,7 @@ import {
 	type DispatchContext,
 } from "./provision.ts";
 
-/** The tool name §4.9's delegation row records, verbatim — one name. */
+/** The tool name §4.9's Home statement records, verbatim — one name. */
 export const DISPATCH_TOOL_NAME = "gitjig_dispatch";
 
 /** Provision failure, refused through the composed pipeline (§3.9). */

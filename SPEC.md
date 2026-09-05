@@ -625,7 +625,7 @@ The norm is **explicitly advisory** (§3.1 rule 1) — the layer is an affordanc
 
 A **dispatch instrument** composes a delegate's brief in §1.5's dispatch-facts form, provisions an isolated execution context, runs the delegate, and accepts only a bounded structured return. Its canonical name is the **dispatcher** — the token §1.8 already uses (§2.7); the roles §1.5–§1.9 name keep their names, and no rival vocabulary is minted for them.
 
-**Home.** The instrument homes at `.pi/extensions/gitjig/dispatch/`, resolving inside `.pi/` (§4.1), on the same capability ground as §4.8's rung 1: dispatch evaluates predicates and takes acts — provisioning the isolation §1.5 requires, the blind compare, accepting nothing past the bounded return — that must not be contingent on a model's cooperation.
+**Home.** The instrument homes at `.pi/extensions/gitjig/dispatch/`, registered as the runtime's dispatch tool `gitjig_dispatch` (the §3.3 egress row's naming pattern), resolving inside `.pi/` (§4.1), on the same capability ground as §4.8's rung 1: dispatch evaluates predicates and takes acts — provisioning the isolation §1.5 requires, the blind compare, accepting nothing past the bounded return — that must not be contingent on a model's cooperation.
 
 **One home, many call sites.** The instrument has one home; however an invocation arises — operator-initiated or model-initiated — it is a call site of that one instrument. That dissolves the invoker question: the rule keys on capability, never on invoker, and the call sites compose downward in §3.11's shape — invocation surfaces converge on one dispatcher, and the dispatcher stands as a call site of §3.3-row predicates, mapped below.
 

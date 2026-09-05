@@ -10,8 +10,8 @@
  * `GIT_CONFIG_PARAMETERS` / `GIT_CONFIG_COUNT`) are
  * DELETED, because git resolves those ahead of cwd and an inherited one
  * retargets every delegate git write at the caller repository despite
- * the pinned cwd, or injects config into it (§1.5), and the ONE state
- * seam is rebound —
+ * the pinned cwd, or injects arbitrary config into the delegate's git
+ * children (§1.5), and the ONE state seam is rebound —
  * `GITJIG_TEST_STATE_ROOT=<scratch>/state`
  * (§5.5's disposable-root carve-out, pointed inside the scratch so the
  * delegate's state dies with the dispatch). Both streams are drained
