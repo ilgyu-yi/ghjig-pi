@@ -97,7 +97,8 @@ export function registerPublishTool(pi: ExtensionAPI, repoRoot: string, stateRoo
 				// locators are numbers, so this composition carries no body byte.
 				const text =
 					"publish refused: disposition refuse-match; " +
-					`patterns ${scan.patternIds.join(", ")}; lines ${scan.lines.join(", ")}`;
+					`patterns ${scan.patternIds.join(", ")}; lines ${scan.lines.join(", ")} — ` +
+					"respell or remove the located spans and call again";
 				record("refuse-match", text);
 				return result(text, {
 					disposition: "refuse-match",

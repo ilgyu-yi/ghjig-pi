@@ -21,10 +21,13 @@
  *   - refusal evidence lands on the audit surface as records with
  *     `"category":"egress"`, naming pattern IDs on a match and no pattern
  *     ID on the out-of-domain arm, never the matched text (§3.8, §5.5);
- *   - neutralization transforms each relayed shape to its backtick-wrapped
- *     spelling, whole-shape (`@user`, close-keyword pairs, GH-N, URL-form,
- *     cross-repo refs), while the bare same-repo `#N` stays live (§3.3's
- *     recorded decision).
+ *   - neutralization transforms each relayed shape whole (`@user`,
+ *     close-keyword pairs in both separator spellings, GH-N, URL-form,
+ *     cross-repo refs) into a space-padded backtick wrap whose delimiter
+ *     run is one longer than the longest run in the text each pass lands
+ *     in — CommonMark pairs equal-length runs, so a fixed one-backtick
+ *     wrap is defeated by a stray or adjacent body backtick — while the
+ *     bare same-repo `#N` stays live (§3.3's recorded decision).
  *
  * WHAT THIS SUITE DOES NOT ESTABLISH. The shim proves argv/stdin/cwd
  * discipline against the shim's own contract, never real `gh` behavior:
@@ -84,13 +87,20 @@ assert.ok(awsCase !== undefined && githubCase !== undefined, "the case set lost 
 
 const SECRET_BODY = "zqrefusal context line\n" + (awsCase as { match: string }).match + "\nzqrefusal trailing line\n";
 
-const NEUTRAL_SHAPES = [
-	"@zquser",
-	"Fixes #7",
-	"GH-9",
-	"https://github.com/zqowner/zqrepo/issues/11",
-	"zqowner/zqrepo#13",
-] as const;
+/**
+ * Each shape with its expected delimiter run length. The wrap delimiter is
+ * recomputed per pass (longest backtick run in the current text + 1), and
+ * the passes run URL → close-pair → cross-repo → GH-N → mention: on a
+ * backtick-free body where every pass matches, the delimiters escalate
+ * 1, 2, 3, 4, 5 in that pass order.
+ */
+const NEUTRAL_SHAPES: ReadonlyArray<{ raw: string; delimiter: number }> = [
+	{ raw: "https://github.com/zqowner/zqrepo/issues/11", delimiter: 1 },
+	{ raw: "Fixes #7", delimiter: 2 },
+	{ raw: "zqowner/zqrepo#13", delimiter: 3 },
+	{ raw: "GH-9", delimiter: 4 },
+	{ raw: "@zquser", delimiter: 5 },
+];
 const NEUTRAL_BODY =
 	"zqneutral opening line\n" +
 	"ping @zquser about this\n" +
@@ -99,6 +109,19 @@ const NEUTRAL_BODY =
 	"thread at https://github.com/zqowner/zqrepo/issues/11 today\n" +
 	"twin issue zqowner/zqrepo#13 stays open\n" +
 	"see #3 for context\n";
+
+/**
+ * The two measured defeat constructions for a fixed one-backtick wrap —
+ * a stray body backtick that flips CommonMark's equal-length pairing
+ * (line 1) and a body backtick adjacent to the wrap that merges runs so
+ * no span forms (line 2) — plus both colon-trailer close-pair spellings
+ * and the deliberate separator-free non-match (§3.3).
+ */
+const HOSTILE_BODY =
+	"a stray ` backtick precedes @zqstray in this relay\n" +
+	"quoting `@zqadjacent right against the wrap\n" +
+	"trailer spellings Fixes: #21 and fixes:#22 arrive live\n" +
+	"bare fixes#23 adjacency stays a deliberate non-match\n";
 
 const FALSE_BLOCK_BODY =
 	"reviewing the redaction helper:\n" +
@@ -237,12 +260,17 @@ function occurrences(haystack: string, needle: string): number {
 	return haystack.split(needle).length - 1;
 }
 
-/** Whole-shape backtick wrap: every occurrence of the raw shape is a wrapped one. */
-function assertNeutralized(capture: string, raw: string, arm: string): void {
-	const wrapped = "`" + raw + "`";
+/**
+ * Whole-shape wrap at the expected delimiter run length, space-padded:
+ * every occurrence of the raw shape is a wrapped one.
+ */
+function assertNeutralized(capture: string, raw: string, delimiter: number, arm: string): void {
+	const run = "`".repeat(delimiter);
+	const wrapped = run + " " + raw + " " + run;
 	assert.ok(
 		occurrences(capture, wrapped) >= 1,
-		`${arm}: relayed shape ${JSON.stringify(raw)} was not published in its backtick-wrapped inert spelling (§3.3 neutralization)`,
+		`${arm}: relayed shape ${JSON.stringify(raw)} was not published in its delimiter-aware inert spelling ` +
+			`${JSON.stringify(wrapped)} (§3.3 neutralization)`,
 	);
 	assert.equal(
 		occurrences(capture, raw),
@@ -257,6 +285,7 @@ function assertNeutralized(capture: string, raw: string, arm: string): void {
 
 let secretRun: PublishRun;
 let neutralRun: PublishRun;
+let hostileRun: PublishRun;
 let falseBlockRun: PublishRun;
 let nulRun: PublishRun;
 let cfRun: PublishRun;
@@ -264,13 +293,14 @@ let cfRun: PublishRun;
 before(async () => {
 	secretRun = await runPublish(SECRET_BODY);
 	neutralRun = await runPublish(NEUTRAL_BODY);
+	hostileRun = await runPublish(HOSTILE_BODY);
 	falseBlockRun = await runPublish(FALSE_BLOCK_BODY);
 	nulRun = await runPublish((nulCase as { body: string }).body);
 	cfRun = await runPublish((cfCase as { body: string }).body);
 });
 
 after(() => {
-	for (const run of [secretRun, neutralRun, falseBlockRun, nulRun, cfRun]) {
+	for (const run of [secretRun, neutralRun, hostileRun, falseBlockRun, nulRun, cfRun]) {
 		if (run !== undefined) {
 			removeFixture(run.fixture);
 		}
@@ -334,7 +364,7 @@ describe("AC2: relayed shapes publish in inert spellings (issue #83)", () => {
 		assert.ok(existsSync(stdinPath), redUntilRegistered("neutralization stdin capture"));
 		const capture = readFileSync(stdinPath, "utf8");
 		for (const shape of NEUTRAL_SHAPES) {
-			assertNeutralized(capture, shape, "neutralization");
+			assertNeutralized(capture, shape.raw, shape.delimiter, "neutralization");
 		}
 	});
 
@@ -346,9 +376,75 @@ describe("AC2: relayed shapes publish in inert spellings (issue #83)", () => {
 			capture.includes("see #3 for context"),
 			"bare reference: the same-repo pointer idiom did not survive publication intact",
 		);
-		assert.ok(
-			!capture.includes("`#3`"),
+		// Any wrap shape puts a backtick run (with or without its space
+		// padding) directly against the reference; the live idiom never does.
+		assert.doesNotMatch(
+			capture,
+			/`+ ?#3\b/,
 			"bare reference: the same-repo #N was neutralized — §3.3 records it live; wrapping it breaks §5.1's pointer idiom",
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// AC2 — the wrap under hostile/incidental backticks, and the colon trailer.
+// ---------------------------------------------------------------------------
+
+describe("AC2: the wrap survives body backticks; colon trailers are claimed (issue #83)", () => {
+	function hostileCapture(): string {
+		const stdinPath = join(hostileRun.sinkDir, "gh-stdin");
+		assert.ok(existsSync(stdinPath), redUntilRegistered("hostile-body capture"));
+		return readFileSync(stdinPath, "utf8");
+	}
+
+	it("a stray body backtick cannot flip the pairing: the delimiter run out-runs it", () => {
+		// Regression construction 1: with a fixed one-backtick wrap, the stray
+		// backtick pairs with the wrap's opener and the mention renders live.
+		// Here the passes that fired are close-pair (delimiter 2, longest run
+		// in the body is 1) then mention (delimiter 3).
+		const capture = hostileCapture();
+		assert.ok(
+			capture.includes("``` @zqstray ```"),
+			"stray backtick: the mention did not publish at the delimiter length that out-runs the stray run (§3.3)",
+		);
+		assert.equal(
+			occurrences(capture, "@zqstray"),
+			1,
+			"stray backtick: a live spelling of the mention survived outside its wrap",
+		);
+	});
+
+	it("a body backtick adjacent to the wrap is separated, so the runs never merge", () => {
+		// Regression construction 2: a delimiter touching the body backtick
+		// merges into one longer run and no span forms at all.
+		const capture = hostileCapture();
+		assert.ok(
+			capture.includes("quoting ` ``` @zqadjacent ```"),
+			"adjacent backtick: no separating space between the body backtick and the wrap delimiter — " +
+				"the merged run forms no span and the mention renders live (§3.3)",
+		);
+		assert.equal(
+			occurrences(capture, "@zqadjacent"),
+			1,
+			"adjacent backtick: a live spelling of the mention survived outside its wrap",
+		);
+	});
+
+	it("both colon-trailer spellings are claimed; separator-free adjacency stays a non-match", () => {
+		// Platform assumption, RECORDED and not verified here: GitHub honors
+		// the colon trailer (`Fixes: #N` drives auto-close like `Fixes #N`).
+		const capture = hostileCapture();
+		assert.ok(
+			capture.includes("`` Fixes: #21 ``"),
+			"colon trailer: `Fixes: #N` published live — the colon spelling drives the auto-close channel (§3.3)",
+		);
+		assert.ok(
+			capture.includes("`` fixes:#22 ``"),
+			"colon trailer: `fixes:#N` published live — the whitespace-free colon spelling drives auto-close (§3.3)",
+		);
+		assert.ok(
+			capture.includes("bare fixes#23 adjacency stays a deliberate non-match"),
+			"non-match: separator-free `fixes#N` was rewritten — §3.3 keeps that adjacency a deliberate non-match",
 		);
 	});
 });

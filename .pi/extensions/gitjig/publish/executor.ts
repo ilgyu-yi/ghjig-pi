@@ -143,6 +143,12 @@ export function runPublishChild(argv: string[], body: string, repoRoot: string):
 		child.stdin.on("error", () => {});
 		child.stdin.end(body);
 		child.on("exit", (code, signal) => {
+			// The bound is on the child's run, which has just ended — clear it
+			// here, not in `decide`: an orphan can hold the pipes past the
+			// bound, and a kill timer still armed during the flush grace would
+			// mark an in-bound run timed out. A child that never exits still
+			// trips the kill timer. From here the grace timer bounds the flush.
+			clearTimeout(killTimer);
 			// Streams may still be flushing; "close" decides as soon as they
 			// end, and the grace decides when an orphan never lets them end.
 			graceTimer = setTimeout(() => decide(code, signal), STREAM_GRACE_MS);
